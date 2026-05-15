@@ -70,6 +70,27 @@ const TASK_EVENT_NAMES = new Set([
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
 
+const resolveGrantedHelloScopes = (
+  client: GatewayClient,
+): ReadonlySet<string> | null => {
+  const scopes = client.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 const trimOrNull = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -851,6 +872,13 @@ export const useTaskBoardController = ({
       setCronLoading(false);
       return;
     }
+    const grantedHelloScopes = resolveGrantedHelloScopes(client);
+    if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+      setCronJobs([]);
+      setCronError(null);
+      setCronLoading(false);
+      return;
+    }
     setCronLoading(true);
     setCronError(null);
     try {
@@ -901,6 +929,13 @@ export const useTaskBoardController = ({
 
   const refreshRemoteTasks = useCallback(async () => {
     if (status !== "connected") {
+      setGatewayTasksLoading(false);
+      setGatewayTasksError(null);
+      return;
+    }
+    const grantedHelloScopes = resolveGrantedHelloScopes(client);
+    if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+      setGatewayTasksSupported("unsupported");
       setGatewayTasksLoading(false);
       setGatewayTasksError(null);
       return;

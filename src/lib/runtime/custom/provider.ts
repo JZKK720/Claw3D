@@ -241,6 +241,8 @@ export class CustomRuntimeProvider implements RuntimeProvider {
   readonly capabilities = CUSTOM_RUNTIME_CAPABILITIES;
   readonly metadata;
   private readonly baseUrl: string;
+  private readonly runtimeToken: string;
+  private readonly runtimeAdapterType: string;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly activeRunsByRunId = new Map<string, ActiveRunRecord>();
   private readonly activeRunIdBySessionKey = new Map<string, string>();
@@ -254,11 +256,14 @@ export class CustomRuntimeProvider implements RuntimeProvider {
       runtimeName?: string;
       vendor?: string | null;
       routeProfile?: string | null;
+      runtimeToken?: string;
     }
   ) {
     this.id = options?.id ?? "custom";
     this.label = options?.label ?? "Custom";
     this.baseUrl = normalizeCustomBaseUrl(runtimeUrl);
+    this.runtimeToken = options?.runtimeToken?.trim() ?? "";
+    this.runtimeAdapterType = this.id;
     this.metadata = {
       id: this.id,
       label: this.label,
@@ -313,6 +318,10 @@ export class CustomRuntimeProvider implements RuntimeProvider {
     }
   }
 
+  getLastHello() {
+    return this.client.getLastHello();
+  }
+
   onStatus(handler: (status: GatewayStatus) => void): () => void {
     return this.client.onStatus(handler);
   }
@@ -339,6 +348,15 @@ export class CustomRuntimeProvider implements RuntimeProvider {
 
   async fetchRegistry(): Promise<CustomRuntimeRegistryResponse> {
     return this.fetchJson<CustomRuntimeRegistryResponse>("/registry");
+  }
+
+  private async fetchJson<T>(pathname: string): Promise<T> {
+    return fetchCustomRuntimeJson<T>(
+      this.baseUrl,
+      pathname,
+      this.runtimeToken,
+      this.runtimeAdapterType
+    );
   }
 
   async describeRuntime() {
@@ -530,6 +548,8 @@ export class CustomRuntimeProvider implements RuntimeProvider {
     try {
       const payload = (await requestCustomRuntime({
         runtimeUrl: this.baseUrl,
+        runtimeToken: this.runtimeToken,
+        runtimeAdapterType: this.runtimeAdapterType,
         pathname: "/v1/chat/completions",
         method: "POST",
         signal: controller.signal,
@@ -707,9 +727,5 @@ export class CustomRuntimeProvider implements RuntimeProvider {
     };
     this.sessions.set(sessionKey, session);
     return session;
-  }
-
-  private async fetchJson<T = unknown>(pathname: string): Promise<T> {
-    return fetchCustomRuntimeJson<T>(this.baseUrl, pathname);
   }
 }

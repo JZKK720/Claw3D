@@ -57,6 +57,10 @@ export class DemoRuntimeProvider implements RuntimeProvider {
     }
   }
 
+  getLastHello() {
+    return this.client.getLastHello();
+  }
+
   onStatus(handler: (status: GatewayStatus) => void): () => void {
     return this.client.onStatus(handler);
   }

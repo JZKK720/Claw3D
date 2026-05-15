@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   OFFICE_FLOORS,
   getAdjacentEnabledOfficeFloorId,
+  listEnabledOfficeFloors,
   listAvailableFloorsForAdapter,
   type FloorDefinition,
   type FloorId,
@@ -21,11 +22,13 @@ type OfficeFloorNavProps = {
   onSelectFloor: (floorId: FloorId) => void;
   /** The currently selected adapter — controls which runtime floors are shown */
   activeAdapterType?: FloorProvider | null;
+  showAllEnabledFloors?: boolean;
 };
 
 const PROVIDER_LABEL: Record<FloorProvider, string> = {
   demo: "Demo",
   openclaw: "OpenClaw",
+  ironclaw: "IronClaw",
   hermes: "Hermes",
   paperclip: "Paperclip",
   custom: "Custom",
@@ -58,7 +61,7 @@ const renderFloorButton = (params: {
           : "border-white/10 bg-black/45 hover:border-white/25 hover:bg-black/55",
         floor.enabled ? "cursor-pointer" : "cursor-not-allowed opacity-45",
       ].join(" ")}
-      aria-pressed={active}
+      aria-pressed={active ? "true" : "false"}
       aria-label={`Select ${floor.label}`}
     >
       <div className="flex items-center justify-between gap-2">
@@ -98,8 +101,11 @@ export function OfficeFloorNav({
   floorRosterCache,
   onSelectFloor,
   activeAdapterType,
+  showAllEnabledFloors = false,
 }: OfficeFloorNavProps) {
-  const availableFloors = listAvailableFloorsForAdapter(activeAdapterType ?? null);
+  const availableFloors = showAllEnabledFloors
+    ? listEnabledOfficeFloors()
+    : listAvailableFloorsForAdapter(activeAdapterType ?? null);
   const buildingFloors = availableFloors.filter((f) => f.zone === "building");
   const outsideFloors = availableFloors.filter((f) => f.zone === "outside");
 
@@ -144,7 +150,7 @@ export function OfficeFloorNav({
           type="button"
           onClick={toggleDirectoryCollapsed}
           className="flex w-full items-center justify-between gap-2 rounded font-mono text-[10px] uppercase tracking-[0.18em] text-amber-200/70 transition-colors hover:text-amber-100"
-          aria-expanded={!directoryCollapsed}
+          aria-expanded={directoryCollapsed ? "false" : "true"}
           aria-controls="office-floor-directory-body"
           aria-label={
             directoryCollapsed ? "Expand building directory" : "Collapse building directory"

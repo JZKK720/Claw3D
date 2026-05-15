@@ -1,12 +1,83 @@
 import { NextResponse } from "next/server";
 
+import {
+  loadLocalGatewayDefaults,
+  loadStudioSettings,
+} from "@/lib/studio/settings-store";
+import type {
+  StudioGatewayAdapterType,
+  StudioGatewayProfile,
+  StudioGatewaySettings,
+} from "@/lib/studio/settings";
+
 export const runtime = "nodejs";
 
 type CustomRuntimeRequestBody = {
   runtimeUrl?: string;
+  runtimeToken?: string;
+  runtimeAdapterType?: StudioGatewayAdapterType;
   pathname?: string;
   method?: string;
   body?: unknown;
+};
+
+const normalizeAdapterType = (value: unknown): StudioGatewayAdapterType | null => {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (
+    normalized === "openclaw" ||
+    normalized === "ironclaw" ||
+    normalized === "hermes" ||
+    normalized === "demo" ||
+    normalized === "local" ||
+    normalized === "claw3d" ||
+    normalized === "custom"
+  ) {
+    return normalized;
+  }
+  return null;
+};
+
+const resolveStoredProfile = (
+  adapterType: StudioGatewayAdapterType,
+  gateway: StudioGatewaySettings | null
+): StudioGatewayProfile | null => {
+  const explicitProfile = gateway?.profiles?.[adapterType];
+  if (explicitProfile?.url) {
+    return explicitProfile;
+  }
+  if (gateway?.adapterType === adapterType && gateway.url.trim()) {
+    return {
+      url: gateway.url,
+      token: gateway.token ?? "",
+    };
+  }
+  return null;
+};
+
+const resolveServerRuntimeToken = (
+  adapterType: StudioGatewayAdapterType | null,
+  runtimeUrl: string
+): string => {
+  if (!adapterType) return "";
+
+  const settings = loadStudioSettings();
+  const localDefaults = loadLocalGatewayDefaults();
+  const candidates = [
+    resolveStoredProfile(adapterType, settings.gateway),
+    resolveStoredProfile(adapterType, localDefaults),
+  ].filter((profile): profile is StudioGatewayProfile => Boolean(profile?.url));
+
+  for (const profile of candidates) {
+    try {
+      if (normalizeRuntimeUrl(profile.url) !== runtimeUrl) continue;
+      const token = profile.token.trim();
+      if (token) return token;
+    } catch {
+      continue;
+    }
+  }
+
+  return "";
 };
 
 const isRuntimeUrlAllowed = (runtimeUrl: string): boolean => {
@@ -82,6 +153,10 @@ export async function POST(request: Request) {
 
   try {
     const runtimeUrl = normalizeRuntimeUrl(payload.runtimeUrl ?? "");
+    const runtimeAdapterType = normalizeAdapterType(payload.runtimeAdapterType);
+    const runtimeToken =
+      (typeof payload.runtimeToken === "string" ? payload.runtimeToken.trim() : "") ||
+      resolveServerRuntimeToken(runtimeAdapterType, runtimeUrl);
     const pathname = normalizePathname(payload.pathname);
     const method = normalizeMethod(payload.method);
     // Propagate the browser abort signal so that cancelling the client-side fetch
@@ -90,6 +165,7 @@ export async function POST(request: Request) {
       method,
       headers: {
         Accept: "application/json",
+        ...(runtimeToken ? { Authorization: `Bearer ${runtimeToken}` } : null),
         ...(method === "POST" ? { "Content-Type": "application/json" } : null),
       },
       body: method === "POST" ? JSON.stringify(payload.body ?? {}) : undefined,

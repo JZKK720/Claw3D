@@ -117,10 +117,12 @@ async function main() {
   const createServer = () =>
     useHttps
       ? https.createServer(httpsCert, (req, res) => {
+          if (accessGate.handleLocalAccessHttp(req, res)) return;
           if (accessGate.handleHttp(req, res)) return;
           handle(req, res);
         })
       : http.createServer((req, res) => {
+          if (accessGate.handleLocalAccessHttp(req, res)) return;
           if (accessGate.handleHttp(req, res)) return;
           handle(req, res);
         });

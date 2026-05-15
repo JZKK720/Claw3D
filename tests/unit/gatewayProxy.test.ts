@@ -32,6 +32,17 @@ describe("createGatewayProxy", () => {
     vi.restoreAllMocks();
   });
 
+  it("normalizes Docker bridge upstream origins to localhost", async () => {
+    const { resolveOriginForUpstream } = await import("../../server/gateway-proxy");
+
+    expect(resolveOriginForUpstream("ws://host.docker.internal:18788")).toBe(
+      "http://localhost:18788"
+    );
+    expect(resolveOriginForUpstream("wss://host.docker.internal:443")).toBe(
+      "https://localhost"
+    );
+  });
+
   it("injects gateway token into connect request", async () => {
     const upstream = new WebSocketServer({ port: 0 });
     const address = upstream.address();
@@ -93,6 +104,188 @@ describe("createGatewayProxy", () => {
 
       expect(seenToken).toBe("token-123");
       expect(seenOrigin).toBe(`http://localhost:${address.port}`);
+    } finally {
+      for (const client of upstream.clients) {
+        client.close();
+      }
+      await Promise.all([
+        closeWebSocket(browser),
+        closeWebSocketServer(upstream),
+        closeHttpServer(proxyHttp),
+      ]);
+    }
+  });
+
+  it("injects gateway token and downgrades device-auth-only browser connect to webchat-ui", async () => {
+    const upstream = new WebSocketServer({ port: 0 });
+    const address = upstream.address();
+    if (!address || typeof address === "string") {
+      throw new Error("expected upstream server to have a port");
+    }
+    const upstreamUrl = `ws://127.0.0.1:${address.port}`;
+
+    let seenToken: string | null = null;
+    let seenClientId: string | null = null;
+    let seenDeviceId: string | null = null;
+    upstream.on("connection", (ws) => {
+      ws.on("message", (raw) => {
+        const parsed = JSON.parse(String(raw));
+        if (parsed?.method === "connect") {
+          seenToken = parsed?.params?.auth?.token ?? null;
+          seenClientId = parsed?.params?.client?.id ?? null;
+          seenDeviceId = parsed?.params?.device?.id ?? null;
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: parsed.id,
+              ok: true,
+              payload: { type: "hello-ok", protocol: 3, auth: {} },
+            })
+          );
+        }
+      });
+    });
+
+    const { createGatewayProxy } = await import("../../server/gateway-proxy");
+
+    const proxyHttp = await import("node:http").then((m) => m.createServer());
+    const proxy = createGatewayProxy({
+      loadUpstreamSettings: async () => ({
+        url: upstreamUrl,
+        token: "token-123",
+        adapterType: "openclaw",
+      }),
+      allowWs: (req: { url?: string }) => req.url === "/api/gateway/ws",
+      logError: () => {},
+    });
+    proxyHttp.on("upgrade", (req, socket, head) => proxy.handleUpgrade(req, socket, head));
+
+    await new Promise<void>((resolve) => proxyHttp.listen(0, "127.0.0.1", resolve));
+    const proxyAddr = proxyHttp.address();
+    if (!proxyAddr || typeof proxyAddr === "string") {
+      throw new Error("expected proxy server to have a port");
+    }
+
+    const browser = new WebSocket(`ws://127.0.0.1:${proxyAddr.port}/api/gateway/ws`);
+    try {
+      await waitForEvent(browser, "open");
+
+      browser.send(
+        JSON.stringify({
+          type: "req",
+          id: "connect-device-auth-only",
+          method: "connect",
+          params: {
+            client: {
+              id: "openclaw-control-ui",
+            },
+            device: {
+              id: "device-id-123",
+              publicKey: "device-public-key-123",
+              signature: "device-signature-123",
+              signedAt: Date.now(),
+              nonce: "device-nonce-123",
+            },
+          },
+        })
+      );
+
+      await waitForEvent(browser, "message");
+
+      expect(seenToken).toBe("token-123");
+      expect(seenClientId).toBe("webchat-ui");
+      expect(seenDeviceId).toBeNull();
+    } finally {
+      for (const client of upstream.clients) {
+        client.close();
+      }
+      await Promise.all([
+        closeWebSocket(browser),
+        closeWebSocketServer(upstream),
+        closeHttpServer(proxyHttp),
+      ]);
+    }
+  });
+
+  it("injects gateway token and strips webchat-ui device auth when browser did not send shared auth", async () => {
+    const upstream = new WebSocketServer({ port: 0 });
+    const address = upstream.address();
+    if (!address || typeof address === "string") {
+      throw new Error("expected upstream server to have a port");
+    }
+    const upstreamUrl = `ws://127.0.0.1:${address.port}`;
+
+    let seenToken: string | null = null;
+    let seenClientId: string | null = null;
+    let seenDeviceId: string | null = null;
+    upstream.on("connection", (ws) => {
+      ws.on("message", (raw) => {
+        const parsed = JSON.parse(String(raw));
+        if (parsed?.method === "connect") {
+          seenToken = parsed?.params?.auth?.token ?? null;
+          seenClientId = parsed?.params?.client?.id ?? null;
+          seenDeviceId = parsed?.params?.device?.id ?? null;
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: parsed.id,
+              ok: true,
+              payload: { type: "hello-ok", protocol: 3, auth: {} },
+            })
+          );
+        }
+      });
+    });
+
+    const { createGatewayProxy } = await import("../../server/gateway-proxy");
+
+    const proxyHttp = await import("node:http").then((m) => m.createServer());
+    const proxy = createGatewayProxy({
+      loadUpstreamSettings: async () => ({
+        url: upstreamUrl,
+        token: "token-123",
+        adapterType: "openclaw",
+      }),
+      allowWs: (req: { url?: string }) => req.url === "/api/gateway/ws",
+      logError: () => {},
+    });
+    proxyHttp.on("upgrade", (req, socket, head) => proxy.handleUpgrade(req, socket, head));
+
+    await new Promise<void>((resolve) => proxyHttp.listen(0, "127.0.0.1", resolve));
+    const proxyAddr = proxyHttp.address();
+    if (!proxyAddr || typeof proxyAddr === "string") {
+      throw new Error("expected proxy server to have a port");
+    }
+
+    const browser = new WebSocket(`ws://127.0.0.1:${proxyAddr.port}/api/gateway/ws`);
+    try {
+      await waitForEvent(browser, "open");
+
+      browser.send(
+        JSON.stringify({
+          type: "req",
+          id: "connect-webchat-device-auth-only",
+          method: "connect",
+          params: {
+            client: {
+              id: "webchat-ui",
+            },
+            device: {
+              id: "device-id-456",
+              publicKey: "device-public-key-456",
+              signature: "device-signature-456",
+              signedAt: Date.now(),
+              nonce: "device-nonce-456",
+            },
+          },
+        })
+      );
+
+      await waitForEvent(browser, "message");
+
+      expect(seenToken).toBe("token-123");
+      expect(seenClientId).toBe("webchat-ui");
+      expect(seenDeviceId).toBeNull();
     } finally {
       for (const client of upstream.clients) {
         client.close();

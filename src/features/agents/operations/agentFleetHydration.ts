@@ -17,7 +17,12 @@ import { deriveHydrateAgentFleetResult } from "@/features/agents/operations/agen
 
 type GatewayClientLike = {
   call: (method: string, params: unknown) => Promise<unknown>;
-  getLastHello?: () => { snapshot?: unknown } | null;
+  getLastHello?: () => {
+    snapshot?: unknown;
+    auth?: {
+      scopes?: string[];
+    };
+  } | null;
 };
 
 type AgentsListResult = {
@@ -62,6 +67,27 @@ type ExecApprovalsSnapshot = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const resolveGrantedHelloScopes = (
+  client: GatewayClientLike
+): ReadonlySet<string> | null => {
+  const scopes = client.getLastHello?.()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string
+) => grantedScopes === null || grantedScopes.has(scope);
 
 const parseIdentityNameFromContent = (content: string): string | null => {
   for (const line of content.split(/\r?\n/)) {
@@ -127,14 +153,24 @@ export async function hydrateAgentFleetFromGateway(params: {
   client: GatewayClientLike;
   gatewayUrl: string;
   cachedConfigSnapshot: GatewayModelPolicySnapshot | null;
+  supportsConfig?: boolean;
   loadStudioSettings: () => Promise<StudioSettings | StudioSettingsPublic | null>;
   isDisconnectLikeError: (err: unknown) => boolean;
   logError?: (message: string, error: unknown) => void;
 }): Promise<HydrateAgentFleetResult> {
   const logError = params.logError ?? ((message, error) => console.error(message, error));
+  const supportsConfig = params.supportsConfig ?? true;
+  const grantedHelloScopes = resolveGrantedHelloScopes(params.client);
+  const canReadGateway = hasGrantedHelloScope(grantedHelloScopes, "operator.read");
+  const canLoadExecApprovals =
+    hasGrantedHelloScope(grantedHelloScopes, "operator.admin") ||
+    hasGrantedHelloScope(grantedHelloScopes, "operator.approvals");
+  const helloSnapshotFallback = resolveAgentsListFromHelloSnapshot(
+    params.client.getLastHello?.()?.snapshot
+  );
 
   let configSnapshot = params.cachedConfigSnapshot;
-  if (!configSnapshot) {
+  if (supportsConfig && canReadGateway && !configSnapshot) {
     try {
       configSnapshot = (await params.client.call(
         "config.get",
@@ -158,28 +194,29 @@ export async function hydrateAgentFleetFromGateway(params: {
   }
 
   let execApprovalsSnapshot: ExecApprovalsSnapshot | null = null;
-  try {
-    execApprovalsSnapshot = (await params.client.call(
-      "exec.approvals.get",
-      {}
-    )) as ExecApprovalsSnapshot;
-  } catch (err) {
-    if (!params.isDisconnectLikeError(err)) {
-      logError("Failed to load exec approvals while loading agents.", err);
+  if (canLoadExecApprovals) {
+    try {
+      execApprovalsSnapshot = (await params.client.call(
+        "exec.approvals.get",
+        {}
+      )) as ExecApprovalsSnapshot;
+    } catch (err) {
+      if (!params.isDisconnectLikeError(err)) {
+        logError("Failed to load exec approvals while loading agents.", err);
+      }
     }
   }
 
-  const helloSnapshotFallback = resolveAgentsListFromHelloSnapshot(
-    params.client.getLastHello?.()?.snapshot
-  );
-  let agentsResult: AgentsListResult;
-  try {
-    agentsResult = (await params.client.call("agents.list", {})) as AgentsListResult;
-  } catch (err) {
-    if (helloSnapshotFallback) {
-      agentsResult = helloSnapshotFallback;
-    } else {
-      throw err;
+  let agentsResult: AgentsListResult | null = !canReadGateway ? helloSnapshotFallback : null;
+  if (!agentsResult) {
+    try {
+      agentsResult = (await params.client.call("agents.list", {})) as AgentsListResult;
+    } catch (err) {
+      if (helloSnapshotFallback) {
+        agentsResult = helloSnapshotFallback;
+      } else {
+        throw err;
+      }
     }
   }
   if (!Array.isArray(agentsResult?.agents) || agentsResult.agents.length === 0) {
@@ -191,6 +228,9 @@ export async function hydrateAgentFleetFromGateway(params: {
     ...agentsResult,
     agents: await Promise.all(
       agentsResult.agents.map(async (agent) => {
+        if (!canReadGateway) {
+          return agent;
+        }
         const identityName =
           typeof agent.identity?.name === "string" ? agent.identity.name.trim() : "";
         const listedName = typeof agent.name === "string" ? agent.name.trim() : "";
@@ -249,6 +289,10 @@ export async function hydrateAgentFleetFromGateway(params: {
   const mainSessionKeyByAgent = new Map<string, SessionsListEntry | null>();
   await Promise.all(
     agentsResult.agents.map(async (agent) => {
+      if (!canReadGateway) {
+        mainSessionKeyByAgent.set(agent.id, null);
+        return;
+      }
       try {
         const expectedMainKey = buildAgentMainSessionKey(agent.id, mainKey);
         const sessions = (await params.client.call("sessions.list", {
@@ -273,7 +317,8 @@ export async function hydrateAgentFleetFromGateway(params: {
 
   let statusSummary: SummaryStatusSnapshot | null = null;
   let previewResult: SummaryPreviewSnapshot | null = null;
-  try {
+  if (canReadGateway) {
+    try {
     const sessionKeys = Array.from(
       new Set(
         agentsResult.agents
@@ -293,10 +338,11 @@ export async function hydrateAgentFleetFromGateway(params: {
       ]);
       statusSummary = snapshot[0] ?? null;
       previewResult = snapshot[1] ?? null;
-    }
-  } catch (err) {
-    if (!params.isDisconnectLikeError(err)) {
-      logError("Failed to load initial summary snapshot.", err);
+      }
+    } catch (err) {
+      if (!params.isDisconnectLikeError(err)) {
+        logError("Failed to load initial summary snapshot.", err);
+      }
     }
   }
 

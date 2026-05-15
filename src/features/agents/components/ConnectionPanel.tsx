@@ -39,6 +39,7 @@ export const ConnectionPanel = ({
   const isConnected = status === "connected";
   const isConnecting = status === "connecting";
   const tokenOptional =
+    selectedAdapterType === "ironclaw" ||
     selectedAdapterType === "hermes" ||
     selectedAdapterType === "demo" ||
     selectedAdapterType === "local" ||
@@ -49,6 +50,9 @@ export const ConnectionPanel = ({
   };
   const applyHermesPreset = () => {
     onAdapterTypeChange("hermes");
+  };
+  const applyIronClawPreset = () => {
+    onAdapterTypeChange("ironclaw");
   };
   const applyCustomPreset = () => {
     onAdapterTypeChange("custom");
@@ -65,6 +69,8 @@ export const ConnectionPanel = ({
   const selectedAdapterHint =
     selectedAdapterType === "openclaw"
       ? "OpenClaw owns provider/model routing behind the gateway."
+      : selectedAdapterType === "ironclaw"
+        ? "IronClaw uses the dedicated HTTP runtime path with bearer-token auth when configured."
       : selectedAdapterType === "hermes"
         ? "Hermes owns provider/account routing behind the gateway."
         : selectedAdapterType === "demo"
@@ -115,7 +121,7 @@ export const ConnectionPanel = ({
             type="text"
             value={gatewayUrl}
             onChange={(event) => onGatewayUrlChange(event.target.value)}
-            placeholder="ws://localhost:18789"
+            placeholder={selectedAdapterType === "ironclaw" ? "http://localhost:3231" : "ws://localhost:18789"}
             spellCheck={false}
           />
         </label>
@@ -146,6 +152,13 @@ export const ConnectionPanel = ({
           onClick={applyDemoPreset}
         >
           Demo backend
+        </button>
+        <button
+          className="ui-btn-secondary px-3 py-1.5 text-[11px] font-semibold tracking-[0.05em]"
+          type="button"
+          onClick={applyIronClawPreset}
+        >
+          IronClaw backend
         </button>
         <button
           className="ui-btn-secondary px-3 py-1.5 text-[11px] font-semibold tracking-[0.05em]"

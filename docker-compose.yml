@@ -1,0 +1,118 @@
+# Claw3D — Docker Compose
+#
+# Host port: 3006  →  container port: 3000
+# (3000 is occupied on the host; override with HOST_PORT=<n> in .env)
+#
+# Required before first start:
+#   cp .env.example .env
+#   # Edit .env and set at minimum:
+#   #   CLAW3D_GATEWAY_URL=ws://<your-openclaw-gateway-host>:18789
+#   #   STUDIO_ACCESS_TOKEN=<some-strong-secret>
+#
+# Then:
+#   docker compose up
+#   # Open http://localhost:${HOST_PORT:-3006}/studio-access
+#   # Enter STUDIO_ACCESS_TOKEN once to set the studio_access cookie
+#   # Revisit /studio-access later if you need to clear or rotate the cookie
+
+services:
+  claw3d:
+    image: "${CLAW3D_IMAGE:-ghcr.io/iamlukethedev/claw3d:latest}"
+    # After your fork publishes ghcr.io/<your-owner>/claw3d:main, set
+    # CLAW3D_IMAGE in .env to follow your fork instead of upstream.
+    # The GHCR image ships next.config.ts but no TypeScript runtime (prod deps only).
+    # We mount a pre-compiled next.config.js and remove the .ts so Next.js uses .js directly.
+    command: sh -c "rm -f /app/next.config.ts && exec node /app/server/index.js"
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-3006}:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Bind to all interfaces so Docker can forward the port.
+      HOST: "0.0.0.0"
+      PORT: "3000"
+
+      # Studio state directory inside the container.
+      OPENCLAW_STATE_DIR: /root/.openclaw
+
+      # --- Gateway connection ---
+      # Runtime gateway URL (no rebuild needed).
+      # Point this at your running OpenClaw Gateway.
+      CLAW3D_GATEWAY_URL: "${CLAW3D_GATEWAY_URL:-ws://host.docker.internal:18789}"
+      CLAW3D_GATEWAY_TOKEN: "${CLAW3D_GATEWAY_TOKEN:-}"
+      CLAW3D_GATEWAY_TOKEN_FILE: "${CLAW3D_GATEWAY_TOKEN_FILE:-}"
+      CLAW3D_GATEWAY_ADAPTER_TYPE: "${CLAW3D_GATEWAY_ADAPTER_TYPE:-openclaw}"
+      HERMES_ADAPTER_HOST: "${HERMES_ADAPTER_HOST:-}"
+      HERMES_ADAPTER_PORT: "${HERMES_ADAPTER_PORT:-}"
+      DEMO_ADAPTER_HOST: "${DEMO_ADAPTER_HOST:-}"
+      DEMO_ADAPTER_PORT: "${DEMO_ADAPTER_PORT:-}"
+      IRONCLAW_GATEWAY_URL: "${IRONCLAW_GATEWAY_URL:-}"
+      IRONCLAW_GATEWAY_TOKEN: "${IRONCLAW_GATEWAY_TOKEN:-}"
+      IRONCLAW_GATEWAY_TOKEN_FILE: "${IRONCLAW_GATEWAY_TOKEN_FILE:-}"
+      # The Studio proxy enforces an upstream allowlist in production.
+      # For the local Docker workflow, allow the host-side runtimes explicitly.
+      UPSTREAM_ALLOWLIST: "${UPSTREAM_ALLOWLIST:-host.docker.internal,localhost,127.0.0.1}"
+      CUSTOM_RUNTIME_ALLOWLIST: "${CUSTOM_RUNTIME_ALLOWLIST:-}"
+
+      # Required when HOST is not localhost (i.e. always in Docker).
+      # Set a strong secret in your .env file. After startup, browse to
+      # /studio-access on localhost once to mint the studio_access cookie.
+      # The helper is direct-localhost only; remote deployments should mint the
+      # cookie in a proxy or auth layer instead.
+      STUDIO_ACCESS_TOKEN: "${STUDIO_ACCESS_TOKEN}"
+      # Local Docker opt-in: allow the helper on localhost even though Docker
+      # bridge traffic reaches the container from a non-loopback socket.
+      STUDIO_ACCESS_LOCAL_HELPER: "${STUDIO_ACCESS_LOCAL_HELPER:-1}"
+
+      # --- Optional features ---
+      ELEVENLABS_API_KEY: "${ELEVENLABS_API_KEY:-}"
+      ELEVENLABS_VOICE_ID: "${ELEVENLABS_VOICE_ID:-}"
+      ELEVENLABS_MODEL_ID: "${ELEVENLABS_MODEL_ID:-}"
+
+    volumes:
+      # Pre-compiled next.config.js: avoids the TypeScript runtime requirement in the GHCR image
+      # (image ships next.config.ts but has no TypeScript in prod node_modules).
+      - ./next.config.js:/app/next.config.js:ro
+      # Use the local server runtime so access-gate and other server-side fixes apply
+      # without rebuilding or republishing the GHCR image.
+      - ./server:/app/server:ro
+      # Local runtime tokens/API keys stay outside the repo history.
+      - ./.secrets:/app/.secrets:ro
+      # Persist Studio settings (gateway URL, token, office layout) across restarts.
+      - openclaw-state:/root/.openclaw
+
+    depends_on:
+      - hermes-adapter
+
+    restart: unless-stopped
+
+    # Allow the container to resolve host.docker.internal on Linux.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  hermes-adapter:
+    image: "${CLAW3D_IMAGE:-ghcr.io/iamlukethedev/claw3d:latest}"
+    command: node /app/server/hermes-gateway-adapter.js
+    ports:
+      - "${HOST_BIND:-127.0.0.1}:${HERMES_ADAPTER_PORT:-18791}:${HERMES_ADAPTER_PORT:-18791}"
+    environment:
+      NODE_ENV: production
+      HERMES_API_URL: "${HERMES_ADAPTER_API_URL:-http://host.docker.internal:8642}"
+      HERMES_API_KEY: "${HERMES_API_KEY:-}"
+      HERMES_API_KEY_FILE: "${HERMES_API_KEY_FILE:-}"
+      HERMES_ADAPTER_BIND_HOST: "0.0.0.0"
+      HERMES_ADAPTER_PORT: "${HERMES_ADAPTER_PORT:-18791}"
+      HERMES_MODEL: "${HERMES_MODEL:-hermes}"
+      HERMES_AGENT_NAME: "${HERMES_AGENT_NAME:-Hermes}"
+      HOME: /root
+    volumes:
+      - ./server:/app/server:ro
+      - ./.secrets:/app/.secrets:ro
+      - hermes-state:/root/.hermes
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  openclaw-state:
+  hermes-state:

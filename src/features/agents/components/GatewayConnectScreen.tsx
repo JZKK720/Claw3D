@@ -48,6 +48,7 @@ export const GatewayConnectScreen = ({
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [showToken, setShowToken] = useState(false);
   const tokenOptional =
+    selectedAdapterType === "ironclaw" ||
     selectedAdapterType === "hermes" ||
     selectedAdapterType === "demo" ||
     selectedAdapterType === "local" ||
@@ -72,6 +73,9 @@ export const GatewayConnectScreen = ({
   };
   const useHermesPreset = () => {
     onAdapterTypeChange("hermes");
+  };
+  const useIronClawPreset = () => {
+    onAdapterTypeChange("ironclaw");
   };
   const useOpenClawPreset = () => {
     onAdapterTypeChange("openclaw");
@@ -101,6 +105,8 @@ export const GatewayConnectScreen = ({
     switch (selectedAdapterType) {
       case "openclaw":
         return "OpenClaw is the provider-rich gateway path. Use this when you want upstream model/provider routing managed by OpenClaw itself.";
+      case "ironclaw":
+        return "IronClaw uses its dedicated HTTP runtime path in Studio. Point this at the IronClaw app URL, then use the gateway token as the upstream token when bearer auth is enabled.";
       case "hermes":
         return "Hermes is the agent runtime path with its own provider/account flow behind the gateway.";
       case "demo":
@@ -171,7 +177,11 @@ export const GatewayConnectScreen = ({
           type="text"
           value={gatewayUrl}
           onChange={(event) => onGatewayUrlChange(event.target.value)}
-          placeholder="wss://your-gateway.example.com"
+          placeholder={
+            selectedAdapterType === "ironclaw"
+              ? "http://localhost:3231"
+              : "wss://your-gateway.example.com"
+          }
           spellCheck={false}
         />
       </label>
@@ -282,6 +292,13 @@ export const GatewayConnectScreen = ({
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-[11px] font-semibold tracking-[0.05em]"
+              onClick={useIronClawPreset}
+            >
+              IronClaw backend
+            </button>
+            <button
+              type="button"
+              className="ui-btn-secondary px-3 py-1.5 text-[11px] font-semibold tracking-[0.05em]"
               onClick={useHermesPreset}
             >
               Hermes backend
@@ -338,11 +355,19 @@ export const GatewayConnectScreen = ({
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
+            <p className="text-xs font-medium text-foreground">Using IronClaw locally?</p>
+            <p className="mt-1 text-xs leading-snug text-muted-foreground">
+              Choose <span className="font-mono text-foreground">IronClaw backend</span> and point the URL at
+              <span className="font-mono text-foreground"> http://localhost:3231</span> when the IronClaw app server is running locally.
+              Use the IronClaw gateway token as the upstream token if bearer auth is enabled.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-muted/30 px-3 py-3">
             <p className="text-xs font-medium text-foreground">Using Hermes locally?</p>
             <p className="mt-1 text-xs leading-snug text-muted-foreground">
               Run <span className="font-mono text-foreground">npm run hermes-adapter</span>, then choose
               <span className="font-mono text-foreground"> Hermes backend</span>. The default local URL is
-              <span className="font-mono text-foreground"> ws://localhost:18789</span>.
+              <span className="font-mono text-foreground"> ws://localhost:18791</span>.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/30 px-3 py-3">

@@ -91,6 +91,8 @@ describe("GatewayBrowserClient", () => {
     expect(frame.method).toBe("connect");
     expect(typeof frame.id).toBe("string");
     expect(frame.id).toMatch(UUID_V4_RE);
+    expect(frame.params?.minProtocol).toBe(4);
+    expect(frame.params?.maxProtocol).toBe(4);
     expect(frame.params?.client?.id).toBe("openclaw-control-ui");
   });
 

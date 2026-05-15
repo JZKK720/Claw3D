@@ -44,6 +44,25 @@ const normalizeRemoteGatewayUrl = (value: string) => {
   }
 };
 
+const resolveGrantedHelloScopes = (gatewayClient: GatewayClient): ReadonlySet<string> | null => {
+  const scopes = gatewayClient.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 export const useRemoteOfficePresence = ({
   enabled,
   sourceKind,
@@ -165,6 +184,28 @@ export const useRemoteOfficePresence = ({
           console.info("[remote-office] Remote gateway connected.", {
             configuredGatewayUrl: normalizedGatewayUrl,
           });
+        }
+        const grantedHelloScopes = resolveGrantedHelloScopes(gatewayClient);
+        const canReadGateway = hasGrantedHelloScope(grantedHelloScopes, "operator.read");
+        if (!canReadGateway) {
+          const nextSnapshot = buildOfficePresenceSnapshotFromGateway({
+            agentsResult: null,
+            helloSnapshot: gatewayClient.getLastHello()?.snapshot,
+            workspaceId: "remote-gateway",
+          });
+          if (cancelled) return;
+          setSnapshot(nextSnapshot);
+          setError(null);
+          if (!successLoggedRef.current) {
+            console.info("[remote-office] Gateway presence polling fell back to hello snapshot.", {
+              configuredGatewayUrl: normalizedGatewayUrl,
+              agentCount: nextSnapshot.agents.length,
+              timestamp: nextSnapshot.timestamp,
+            });
+            successLoggedRef.current = true;
+            lastLoggedErrorRef.current = null;
+          }
+          return;
         }
         console.info("[remote-office] Requesting remote gateway agents list.", {
           configuredGatewayUrl: normalizedGatewayUrl,

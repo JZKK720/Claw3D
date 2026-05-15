@@ -33,11 +33,11 @@ http://localhost:8642
 Copy `.env.example` to `.env` and set the Hermes values:
 
 ```env
-NEXT_PUBLIC_GATEWAY_URL=ws://localhost:18789
+NEXT_PUBLIC_GATEWAY_URL=ws://localhost:18791
 
 HERMES_API_URL=http://localhost:8642
 HERMES_API_KEY=
-HERMES_ADAPTER_PORT=18789
+HERMES_ADAPTER_PORT=18791
 HERMES_MODEL=hermes
 HERMES_AGENT_NAME=Hermes
 ```
@@ -54,7 +54,7 @@ npm run dev
 Then open `http://localhost:3000` and connect to:
 
 ```text
-ws://localhost:18789
+ws://localhost:18791
 ```
 
 In the connect screen, select `Hermes backend`. Claw3D will persist that
@@ -123,6 +123,34 @@ Claw3D gateway contract today and is ready for upstream testing now.
 
 The runtime seam added in Studio is what makes an ACP-backed Hermes
 provider feasible as a follow-up without reworking the whole UI again.
+
+## Docker-hosted Claw3D + containerized Hermes
+
+If Claw3D runs in Docker but the Hermes API runs in a separate container with a host-published port,
+keep the Hermes API URL pointed at the host from the adapter process, and keep Claw3D pointed at the
+adapter WebSocket, not the raw Hermes API.
+
+Example split:
+
+```env
+# Used by the bundled adapter process (host-run or Docker sidecar)
+HERMES_API_URL=http://127.0.0.1:8789
+# Used by the Docker sidecar specifically
+HERMES_ADAPTER_API_URL=http://host.docker.internal:8789
+# Optional if the Hermes API requires auth
+HERMES_API_KEY_FILE=.secrets/hermes-api-key
+
+# Used by Claw3D running in Docker
+HERMES_ADAPTER_HOST=host.docker.internal
+HERMES_ADAPTER_PORT=18791
+```
+
+In that shape, Claw3D talks to `ws://host.docker.internal:18791`, and the adapter talks to the
+Hermes API on `http://127.0.0.1:8789`.
+
+If you use this repo's Docker Compose workflow, `docker compose up -d` now starts the adapter as a
+sidecar service and mounts `.secrets/` into the container so `HERMES_API_KEY_FILE=.secrets/hermes-api-key`
+works without putting the API key into `.env`.
 
 ## Persistence
 

@@ -14,7 +14,8 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # Build-time gateway URL (overridden at runtime by CLAW3D_GATEWAY_URL).
 ENV NEXT_PUBLIC_GATEWAY_URL=ws://127.0.0.1:18789
-RUN npm run build
+RUN npm run build && \
+    node -e "const ts = require('typescript'); const src = require('fs').readFileSync('next.config.ts', 'utf8'); const result = ts.transpileModule(src, {compilerOptions: {module: ts.ModuleKind.CommonJS, esModuleInterop: true}}); let out = result.outputText + '\nif (module.exports && module.exports.default) module.exports = module.exports.default;\n'; require('fs').writeFileSync('next.config.js', out);"
 
 FROM node:20-slim AS runner
 WORKDIR /app
@@ -27,7 +28,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/server ./server
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/next.config.ts ./next.config.ts
+COPY --from=builder /app/next.config.js ./next.config.js
 
 EXPOSE 3000
 

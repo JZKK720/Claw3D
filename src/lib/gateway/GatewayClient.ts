@@ -15,6 +15,7 @@ import type {
   StudioSettingsPublic,
 } from "@/lib/studio/settings";
 import {
+  coerceString,
   resolveDefaultStudioGatewayProfile,
   resolveStudioGatewayProfiles,
 } from "@/lib/studio/settings";
@@ -26,6 +27,7 @@ import { resolveStudioProxyGatewayUrl } from "@/lib/gateway/proxy-url";
 import { ensureGatewayReloadModeHotForLocalStudio } from "@/lib/gateway/gatewayReloadMode";
 import { isLocalGatewayUrl } from "@/lib/gateway/local-gateway";
 import { GatewayResponseError } from "@/lib/gateway/errors";
+import { probeIronClawRuntime } from "@/lib/runtime/ironclaw/http";
 
 const gatewayDebugEnabled = process.env.NODE_ENV !== "production";
 
@@ -183,6 +185,7 @@ const normalizeLocalGatewayDefaults = (value: unknown): StudioGatewaySettings | 
   const token = typeof raw.token === "string" ? raw.token.trim() : "";
   const adapterType =
     raw.adapterType === "demo" ||
+    raw.adapterType === "ironclaw" ||
     raw.adapterType === "hermes" ||
     raw.adapterType === "openclaw" ||
     raw.adapterType === "local" ||
@@ -210,7 +213,15 @@ const normalizeGatewayProfilesPublic = (
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Partial<Record<StudioGatewayAdapterType, StudioGatewayProfilePublic>>;
   const profiles: Partial<Record<StudioGatewayAdapterType, { url: string; token: string }>> = {};
-  for (const adapterType of ["openclaw", "hermes", "demo", "local", "claw3d", "custom"] as const) {
+  for (const adapterType of [
+    "openclaw",
+    "ironclaw",
+    "hermes",
+    "demo",
+    "local",
+    "claw3d",
+    "custom",
+  ] as const) {
     const profile = normalizeGatewayProfilePublic(raw[adapterType]);
     if (profile) {
       profiles[adapterType] = profile;
@@ -883,12 +894,17 @@ export const useGatewayConnection = (
     if (
       selectedAdapterType === "custom" ||
       selectedAdapterType === "local" ||
-      selectedAdapterType === "claw3d"
+      selectedAdapterType === "claw3d" ||
+      selectedAdapterType === "ironclaw"
     ) {
       setStatus("connecting");
       try {
         await settingsCoordinator.flushPending();
-        await probeCustomRuntime(gatewayUrl);
+        if (selectedAdapterType === "ironclaw") {
+          await probeIronClawRuntime(gatewayUrl, token);
+        } else {
+          await probeCustomRuntime(gatewayUrl, selectedAdapterType);
+        }
         setDetectedAdapterType(selectedAdapterType);
         setStatus("connected");
         setConnectErrorCode(null);
@@ -922,7 +938,7 @@ export const useGatewayConnection = (
             token,
             authScopeKey: gatewayUrl,
             clientName: resolveGatewayClientName(selectedAdapterType, gatewayUrl),
-            disableDeviceAuth: selectedAdapterType !== "openclaw",
+            disableDeviceAuth: selectedAdapterType !== "openclaw" || !token,
           });
           lastError = null;
           break;
@@ -1163,7 +1179,8 @@ export const useGatewayConnection = (
     if (
       selectedAdapterType === "custom" ||
       selectedAdapterType === "local" ||
-      selectedAdapterType === "claw3d"
+      selectedAdapterType === "claw3d" ||
+      selectedAdapterType === "ironclaw"
     ) {
       setStatus("disconnected");
       return;
@@ -1178,17 +1195,20 @@ export const useGatewayConnection = (
   }, []);
 
   const connectPromptReady = settingsLoaded;
+  const normalizedGatewayUrl = coerceString(gatewayUrl);
+  const normalizedToken = coerceString(token);
   const activeAdapterType =
     status === "connected" ? detectedAdapterType ?? selectedAdapterType : selectedAdapterType;
   const shouldPromptForConnect =
     settingsLoaded &&
     status !== "connected" &&
     (selectedAdapterType === "custom" ||
+      selectedAdapterType === "ironclaw" ||
       selectedAdapterType === "local" ||
       selectedAdapterType === "claw3d" ||
       !hasLastKnownGoodState ||
-      !(gatewayUrl ?? "").trim() ||
-      (selectedAdapterType === "openclaw" && !(token ?? "").trim()) ||
+      !normalizedGatewayUrl ||
+      (selectedAdapterType === "openclaw" && !normalizedToken) ||
       wasManualDisconnectRef.current ||
       Boolean(error));
 

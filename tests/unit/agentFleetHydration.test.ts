@@ -158,7 +158,7 @@ describe("hydrateAgentFleetFromGateway", () => {
       expect.objectContaining({
         agentId: "agent-2",
         name: "GLaDOS",
-        runtimeName: "Two",
+        runtimeName: "GLaDOS",
         identityName: "GLaDOS",
         sessionExecHost: "gateway",
         sessionExecSecurity: "full",
@@ -255,3 +255,128 @@ describe("hydrateAgentFleetFromGateway", () => {
   });
 
 });
+
+  it("falls back to the hello snapshot when agents.list is denied", async () => {
+    const gatewayUrl = "ws://localhost:18788";
+
+    const call = vi.fn(async (method: string, params: unknown) => {
+      if (method === "config.get") {
+        return {
+          hash: "hash-1",
+          config: { agents: { defaults: {}, list: [] } },
+        };
+      }
+      if (method === "exec.approvals.get") {
+        return { file: { agents: {} } };
+      }
+      if (method === "agents.list") {
+        throw new Error("missing scope: operator.read");
+      }
+      if (method === "sessions.list") {
+        const { search } = params as Record<string, unknown>;
+        return {
+          sessions: [
+            {
+              key: search,
+              updatedAt: 1,
+              displayName: "Main",
+            },
+          ],
+        };
+      }
+      if (method === "status") {
+        return { sessions: { recent: [], byAgent: [] } };
+      }
+      if (method === "sessions.preview") {
+        return {
+          ts: 1,
+          previews: [
+            {
+              key: "agent:main:main",
+              status: "ok",
+              items: [
+                { role: "assistant", text: "ready", timestamp: "2026-02-10T00:00:00Z" },
+              ],
+            },
+          ],
+        };
+      }
+      throw new Error(`Unhandled method: ${method}`);
+    });
+
+    const result = await hydrateAgentFleetFromGateway({
+      client: {
+        call,
+        getLastHello: () => ({
+          snapshot: {
+            health: {
+              defaultAgentId: "main",
+              agents: [{ agentId: "main", name: "Main" }],
+            },
+            sessionDefaults: {
+              mainKey: "main",
+            },
+          },
+        }),
+      },
+      gatewayUrl,
+      cachedConfigSnapshot: null,
+      loadStudioSettings: async () => defaultStudioSettings(),
+      isDisconnectLikeError: () => false,
+    });
+
+    expect(call).toHaveBeenCalledWith("agents.list", {});
+    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds[0]).toEqual(
+      expect.objectContaining({
+        agentId: "main",
+        name: "Main",
+        runtimeName: "Main",
+        sessionKey: "agent:main:main",
+      })
+    );
+    expect(result.suggestedSelectedAgentId).toBe("main");
+  });
+
+  it("skips privileged hydration calls when hello scopes do not include operator.read", async () => {
+    const gatewayUrl = "ws://localhost:18788";
+
+    const call = vi.fn(async (method: string) => {
+      throw new Error(`Unexpected method: ${method}`);
+    });
+
+    const result = await hydrateAgentFleetFromGateway({
+      client: {
+        call,
+        getLastHello: () => ({
+          auth: {
+            scopes: ["operator.pairing"],
+          },
+          snapshot: {
+            health: {
+              defaultAgentId: "main",
+              agents: [{ agentId: "main", name: "Main" }],
+            },
+            sessionDefaults: {
+              mainKey: "main",
+            },
+          },
+        }),
+      },
+      gatewayUrl,
+      cachedConfigSnapshot: null,
+      loadStudioSettings: async () => defaultStudioSettings(),
+      isDisconnectLikeError: () => false,
+    });
+
+    expect(call).not.toHaveBeenCalled();
+    expect(result.seeds).toHaveLength(1);
+    expect(result.seeds[0]).toEqual(
+      expect.objectContaining({
+        agentId: "main",
+        name: "Main",
+        runtimeName: "Main",
+      })
+    );
+    expect(result.suggestedSelectedAgentId).toBeNull();
+  });

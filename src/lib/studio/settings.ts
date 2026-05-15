@@ -33,6 +33,7 @@ export type StudioGatewaySettings = {
 
 export type StudioGatewayAdapterType =
   | "openclaw"
+  | "ironclaw"
   | "hermes"
   | "demo"
   | "local"
@@ -40,6 +41,7 @@ export type StudioGatewayAdapterType =
   | "custom";
 export const STUDIO_GATEWAY_ADAPTER_TYPES = [
   "openclaw",
+  "ironclaw",
   "hermes",
   "demo",
   "local",
@@ -282,7 +284,9 @@ export type StudioSettingsPatch = {
 
 const SETTINGS_VERSION = 1 as const;
 const DEFAULT_OPENCLAW_GATEWAY_URL = "ws://localhost:18789";
-const DEFAULT_LOCAL_ADAPTER_GATEWAY_URL = "ws://localhost:18789";
+const DEFAULT_HERMES_ADAPTER_GATEWAY_URL = "ws://localhost:18791";
+const DEFAULT_DEMO_ADAPTER_GATEWAY_URL = "ws://localhost:18792";
+const DEFAULT_IRONCLAW_RUNTIME_URL = "http://localhost:3231";
 const DEFAULT_LOCAL_RUNTIME_URL = "http://localhost:7770";
 const DEFAULT_CLAW3D_RUNTIME_URL = "http://localhost:3000/api/runtime/custom";
 const DEFAULT_CUSTOM_RUNTIME_URL = "http://localhost:7770";
@@ -290,7 +294,8 @@ const DEFAULT_CUSTOM_RUNTIME_URL = "http://localhost:7770";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object");
 
-const coerceString = (value: unknown) => (typeof value === "string" ? value.trim() : "");
+export const coerceString = (value: unknown) =>
+  (typeof value === "string" ? value.trim() : "");
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "0.0.0.0"]);
 
 const normalizeGatewayUrl = (value: unknown) => {
@@ -813,6 +818,7 @@ const normalizeGatewayProfiles = (
   const profiles: Partial<Record<StudioGatewayAdapterType, StudioGatewayProfile>> = {};
   for (const adapterType of [
     "openclaw",
+    "ironclaw",
     "hermes",
     "demo",
     "local",
@@ -880,6 +886,7 @@ const mergeGatewayProfiles = (
   };
   for (const adapterType of [
     "openclaw",
+    "ironclaw",
     "hermes",
     "demo",
     "local",
@@ -937,6 +944,7 @@ const normalizeGatewayAdapterType = (
   const adapterType = coerceString(value).toLowerCase();
   if (
     adapterType === "demo" ||
+    adapterType === "ironclaw" ||
     adapterType === "hermes" ||
     adapterType === "openclaw" ||
     adapterType === "local" ||
@@ -970,13 +978,16 @@ export const resolveDefaultStudioGatewayProfile = (
   switch (adapterType) {
     case "claw3d":
       return { url: DEFAULT_CLAW3D_RUNTIME_URL, token: "" };
+    case "ironclaw":
+      return { url: DEFAULT_IRONCLAW_RUNTIME_URL, token: "" };
     case "local":
       return { url: DEFAULT_LOCAL_RUNTIME_URL, token: "" };
     case "custom":
       return { url: DEFAULT_CUSTOM_RUNTIME_URL, token: "" };
     case "hermes":
+      return { url: DEFAULT_HERMES_ADAPTER_GATEWAY_URL, token: "" };
     case "demo":
-      return { url: DEFAULT_LOCAL_ADAPTER_GATEWAY_URL, token: "" };
+      return { url: DEFAULT_DEMO_ADAPTER_GATEWAY_URL, token: "" };
     case "openclaw":
     default:
       return { url: DEFAULT_OPENCLAW_GATEWAY_URL, token: "" };

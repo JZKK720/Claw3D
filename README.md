@@ -1,3 +1,4 @@
+Supported runtimes include: OpenClaw Gateway, IronClaw through its dedicated Studio runtime path, Hermes, a direct HTTP `custom` runtime provider for orchestrator-backed stacks, and a built-in demo gateway for office exploration without a real agent framework.
 # Claw3D — A 3D Workspace for AI Agents
 
 <p align="center">
@@ -45,6 +46,7 @@ Claw3D is the visualization and interaction layer.
 Today it can sit on top of:
 
 - OpenClaw through the existing gateway flow
+- IronClaw through the dedicated HTTP runtime path in Studio
 - Hermes through the bundled WebSocket adapter
 - a direct HTTP `custom` runtime provider for orchestrator-backed stacks
 - a built-in demo gateway for office exploration without a real agent framework
@@ -90,8 +92,10 @@ Requirements:
 - npm 10+ recommended.
 - One of:
   - a working OpenClaw installation with a reachable Gateway URL and token
+  - an IronClaw app/gateway URL plus bearer token when auth is enabled
   - Hermes with the bundled adapter
   - the built-in demo gateway for local exploration
+- Claw3D does not install or build OpenClaw, IronClaw, or Hermes for you.
 
 Prerequisite:
 
@@ -112,6 +116,7 @@ npm run dev
 
 Then open `http://localhost:3000` and configure the gateway URL and token in Studio.
 Studio now also persists the selected backend mode (`OpenClaw`, `Hermes`, `Demo`, `Local`, `Claw3D`, or `Custom`) and
+Studio now also persists the selected backend mode (`OpenClaw`, `IronClaw`, `Hermes`, `Demo`, `Local`, `Claw3D`, or `Custom`) and
 shows the active backend reported by the connected gateway.
 
 ### Runtime profiles
@@ -124,7 +129,8 @@ npm run dev
 ```
 
 Then open `http://localhost:3000`, choose `Local runtime`, `Claw3D runtime`,
-or `Custom backend`, and point the upstream URL at your runtime boundary.
+Then open `http://localhost:3000`, choose `IronClaw backend`, `Local runtime`,
+`Claw3D runtime`, or `Custom backend`, and point the upstream URL at your runtime boundary.
 Typical examples:
 
 ```text
@@ -135,12 +141,24 @@ http://127.0.0.1:7770
 http://localhost:3000/api/runtime/custom
 ```
 
+```text
+http://localhost:3231
+```
+
 Current direct-runtime expectations:
 
 - `GET /health`
 - `GET /state`
 - `GET /registry`
 - `POST /v1/chat/completions`
+
+IronClaw uses its own verified HTTP surface instead of the generic `custom` contract. The current Studio integration talks to:
+
+- `GET /api/gateway/status`
+- `GET /api/chat/threads`
+- `GET /api/chat/history`
+- `POST /api/chat/send`
+If you only want to see the office and agent interactions without installing OpenClaw, IronClaw, or Hermes:
 
 The browser does not call that runtime directly. Claw3D proxies the
 `custom` provider through its own same-origin route at
@@ -176,13 +194,23 @@ npm run dev
 
 See [`docs/hermes-gateway.md`](docs/hermes-gateway.md) for setup details and current scope.
 
-For a local gateway on the same machine, the usual upstream URL is:
+For a local Hermes adapter on the same machine, the usual upstream URL is:
 
 ```text
-ws://localhost:18789
+ws://localhost:18791
 ```
 
 In the connect screen, choose `Hermes backend`, then connect.
+
+If Claw3D itself runs in Docker while Hermes stays on the host, keep the Hermes API on the host
+and run the adapter separately. Then point Claw3D at `ws://host.docker.internal:18791`, not the
+raw Hermes API port.
+
+For the local Docker Compose workflow in this repo, `docker compose up -d` now starts a bundled
+`hermes-adapter` sidecar as well. Keep `HERMES_API_URL` pointed at the host-published Hermes API,
+set `HERMES_ADAPTER_API_URL` to the Docker-reachable form of that same API (usually
+`http://host.docker.internal:8789`), and keep Claw3D pointed at the adapter WebSocket on port
+`18791`.
 
 ## How It Connects
 
@@ -254,16 +282,20 @@ Common environment variables:
 
 - `HOST` and `PORT` control the Studio server bind address and port.
 - `STUDIO_ACCESS_TOKEN` protects Studio when binding to a public host.
+- `STUDIO_ACCESS_LOCAL_HELPER=1` is a local Docker opt-in that allows `/studio-access` to work through the Docker bridge. Do not use it on publicly reachable binds.
 - `UPSTREAM_ALLOWLIST` restricts which upstream gateway hosts Studio may proxy to. Set this in production.
 - `CUSTOM_RUNTIME_ALLOWLIST` restricts which hosts `/api/runtime/custom` may fetch. If unset, it falls back to `UPSTREAM_ALLOWLIST`.
 - `NEXT_PUBLIC_GATEWAY_URL` provides the default upstream gateway URL when Studio settings are empty. **Note:** this is a build-time variable — changes require `npm run build` to take effect.
 - `CLAW3D_GATEWAY_URL` and `CLAW3D_GATEWAY_TOKEN` provide a runtime alternative to `NEXT_PUBLIC_GATEWAY_URL` that takes effect on server restart without a rebuild.
+- `CLAW3D_GATEWAY_TOKEN_FILE`, `IRONCLAW_GATEWAY_TOKEN_FILE`, and `HERMES_API_KEY_FILE` can point at local plaintext files containing those secrets. Relative paths resolve from the repo root, so `.secrets/<name>` works for both host-run scripts and Docker Compose in this repo.
 - `CLAW3D_GATEWAY_ADAPTER_TYPE` can pair with `CLAW3D_GATEWAY_URL` to mark those runtime defaults as `openclaw`, `hermes`, `demo`, `local`, `claw3d`, or `custom`.
 - If `CLAW3D_GATEWAY_URL` is not set, Studio can still surface local Hermes or demo adapter defaults from `HERMES_ADAPTER_PORT` / `DEMO_ADAPTER_PORT`.
+- `HERMES_ADAPTER_HOST` and `DEMO_ADAPTER_HOST` override the default `localhost` host for those port-based defaults. Use `host.docker.internal` when Studio runs in Docker and the adapters stay on the host.
 - OpenClaw file defaults still come from `~/.openclaw/openclaw.json` when present.
 - `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` override the default OpenClaw paths.
 - `OPENCLAW_GATEWAY_SSH_TARGET`, `OPENCLAW_GATEWAY_SSH_USER`, `OPENCLAW_GATEWAY_SSH_PORT`, and `OPENCLAW_GATEWAY_SSH_STRICT_HOST_KEY_CHECKING` support advanced gateway-host operations over SSH when needed.
 - `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, and `ELEVENLABS_MODEL_ID` enable voice reply integration.
+- When `STUDIO_ACCESS_TOKEN` is enabled on localhost, open `/studio-access`, enter the token once, and let Claw3D set the `studio_access` cookie for you. Revisit the same path later if you need to clear or rotate that cookie.
 
 See [`.env.example`](.env.example) for the full local development template.
 
@@ -280,6 +312,10 @@ See [`.env.example`](.env.example) for the full local development template.
 - `npm run e2e` runs Playwright tests.
 - `npm run studio:setup` prepares common local Studio prerequisites.
 - `npm run smoke:dev-server` runs a basic dev-server smoke check.
+- `npm run smoke:live-runtimes` probes the configured OpenClaw, Hermes, and IronClaw upstreams for live reachability.
+- `npm run smoke:runtime-defaults` verifies `/api/studio` surfaces OpenClaw, Hermes, and IronClaw local defaults together.
+
+For local secret files, create `.secrets/openclaw-gateway-token`, `.secrets/ironclaw-gateway-token`, and optionally `.secrets/hermes-api-key`. That directory is ignored by git and mounted into the Docker services at runtime.
 
 ## Documentation
 
@@ -288,6 +324,7 @@ See [`.env.example`](.env.example) for the full local development template.
 - [`TUTORIAL.md`](TUTORIAL.md): detailed step-by-step setup for OpenClaw + Tailscale + Claw3D.
 - [`docs/multi-agent-beta.md`](docs/multi-agent-beta.md): remote office beta setup, connection modes, and limitations.
 - [`docs/runtime-profiles.md`](docs/runtime-profiles.md): saved backend/runtime profiles and the current HTTP runtime seam.
+- [`docs/studio-access-gate.md`](docs/studio-access-gate.md): localhost cookie helper flow and reverse-proxy cookie injection examples.
 - [`CODE_DOCUMENTATION.md`](CODE_DOCUMENTATION.md): practical code map, extension points, and contributor onboarding order.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): local workflow, testing, and PR expectations.
 - [`SUPPORT.md`](SUPPORT.md): where to ask for help and how to route reports.
@@ -309,7 +346,7 @@ If the UI loads but Connect fails, the problem is usually on the Studio -> Gatew
 - Confirm the upstream URL and token in Studio settings.
 - `EPROTO` or `wrong version number` usually means `wss://` was used against a non-TLS endpoint.
 - `INVALID_REQUEST` errors mentioning `minProtocol` or `maxProtocol` usually mean the gateway is too old for Claw3D protocol v3. Upgrade OpenClaw, use the Hermes adapter, or run `npm run demo-gateway`.
-- `401 Studio access token required` usually means `STUDIO_ACCESS_TOKEN` is enabled and the request is missing the expected `studio_access` cookie.
+- `401 Studio access token required` usually means `STUDIO_ACCESS_TOKEN` is enabled and the request is missing the expected `studio_access` cookie. On direct localhost access, open `/studio-access` and enter the token. For remote deployments, provision the cookie through your proxy or auth layer. See [`docs/studio-access-gate.md`](docs/studio-access-gate.md).
 - If `/api/runtime/custom` returns a blocked-host error in production, set `CUSTOM_RUNTIME_ALLOWLIST` or include the runtime host in `UPSTREAM_ALLOWLIST`.
 - Helpful proxy error codes include `studio.gateway_url_missing`, `studio.gateway_token_missing`, `studio.upstream_error`, and `studio.upstream_closed`.
 

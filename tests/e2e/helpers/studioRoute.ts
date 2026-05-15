@@ -1,9 +1,10 @@
 import type { Page, Route, Request } from "@playwright/test";
 import type { AgentAvatarProfile } from "@/lib/avatars/profile";
+import type { StudioGatewaySettingsPublic } from "@/lib/studio/settings";
 
 export type StudioSettingsFixture = {
   version: 1;
-  gateway: { url: string; token: string } | null;
+  gateway: StudioGatewaySettingsPublic | null;
   focused: Record<string, { mode: "focused"; filter: string; selectedAgentId: string | null }>;
   avatars: Record<string, Record<string, AgentAvatarProfile>>;
   taskBoard?: Record<
@@ -141,9 +142,37 @@ const createStudioRoute = (initial: StudioSettingsFixture = DEFAULT_SETTINGS) =>
   };
 };
 
+const seedStudioAccessCookie = async (page: Page) => {
+  const studioAccessToken = String(process.env.STUDIO_ACCESS_TOKEN ?? "").trim();
+  if (!studioAccessToken) return;
+
+  const configuredBaseUrl = String(process.env.PLAYWRIGHT_BASE_URL ?? "").trim();
+  const configuredPort = String(process.env.PLAYWRIGHT_PORT ?? "").trim() || "3000";
+  const cookieUrls = configuredBaseUrl
+    ? [configuredBaseUrl]
+    : [`http://127.0.0.1:${configuredPort}`, `http://localhost:${configuredPort}`];
+
+  await page.context().addCookies(
+    cookieUrls.map((url) => ({
+      name: "studio_access",
+      value: studioAccessToken,
+      url,
+      sameSite: "Lax" as const,
+    })),
+  );
+};
+
+const seedOnboardingCompleted = async (page: Page) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("claw3d:onboarding:completed", "true");
+  });
+};
+
 export const stubStudioRoute = async (
   page: Page,
   initial: StudioSettingsFixture = DEFAULT_SETTINGS
 ) => {
+  await seedOnboardingCompleted(page);
+  await seedStudioAccessCookie(page);
   await page.route("**/api/studio", createStudioRoute(initial));
 };

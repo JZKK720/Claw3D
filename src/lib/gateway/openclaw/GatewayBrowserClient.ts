@@ -28,6 +28,7 @@ const GATEWAY_CLIENT_NAMES = {
 const GATEWAY_CLIENT_MODES = {
   WEBCHAT: "webchat",
 } as const;
+const GATEWAY_PROTOCOL_VERSION = 4;
 
 type CryptoLike = {
   randomUUID?: (() => string) | undefined;
@@ -563,8 +564,8 @@ export class GatewayBrowserClient {
       };
     }
     const params = {
-      minProtocol: 3,
-      maxProtocol: 3,
+      minProtocol: GATEWAY_PROTOCOL_VERSION,
+      maxProtocol: GATEWAY_PROTOCOL_VERSION,
       client: {
         id: this.opts.clientName ?? GATEWAY_CLIENT_NAMES.CONTROL_UI,
         version: this.opts.clientVersion ?? "dev",

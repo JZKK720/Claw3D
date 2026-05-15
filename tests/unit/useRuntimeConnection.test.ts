@@ -2,6 +2,26 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
+const createGatewayConnectionState = (overrides: Record<string, unknown>) => ({
+  client: {
+    getLastHello: () => null,
+  },
+  status: "connected",
+  token: "",
+  localGatewayDefaults: null,
+  error: null,
+  connectPromptReady: true,
+  shouldPromptForConnect: false,
+  connect: async () => {},
+  disconnect: () => {},
+  useLocalGatewayDefaults: () => {},
+  setGatewayUrl: () => {},
+  setToken: () => {},
+  setSelectedAdapterType: () => {},
+  clearError: () => {},
+  ...overrides,
+});
+
 describe("useRuntimeConnection", () => {
   afterEach(() => {
     cleanup();
@@ -11,25 +31,12 @@ describe("useRuntimeConnection", () => {
 
   it("selects the hermes provider from the active adapter type", async () => {
     vi.doMock("@/lib/gateway/GatewayClient", () => ({
-      useGatewayConnection: () => ({
-        client: {},
-        status: "connected",
+      buildAgentMainSessionKey: (agentId: string, mainKey: string) => `agent:${agentId}:${mainKey}`,
+      useGatewayConnection: () => createGatewayConnectionState({
         gatewayUrl: "ws://localhost:18789",
-        token: "",
         selectedAdapterType: "hermes",
         detectedAdapterType: "hermes",
         activeAdapterType: "hermes",
-        localGatewayDefaults: null,
-        error: null,
-        connectPromptReady: true,
-        shouldPromptForConnect: false,
-        connect: async () => {},
-        disconnect: () => {},
-        useLocalGatewayDefaults: () => {},
-        setGatewayUrl: () => {},
-        setToken: () => {},
-        setSelectedAdapterType: () => {},
-        clearError: () => {},
       }),
     }));
 
@@ -53,25 +60,12 @@ describe("useRuntimeConnection", () => {
 
   it("selects the custom provider from the active adapter type", async () => {
     vi.doMock("@/lib/gateway/GatewayClient", () => ({
-      useGatewayConnection: () => ({
-        client: {},
-        status: "connected",
+      buildAgentMainSessionKey: (agentId: string, mainKey: string) => `agent:${agentId}:${mainKey}`,
+      useGatewayConnection: () => createGatewayConnectionState({
         gatewayUrl: "http://127.0.0.1:7770",
-        token: "",
         selectedAdapterType: "custom",
         detectedAdapterType: "custom",
         activeAdapterType: "custom",
-        localGatewayDefaults: null,
-        error: null,
-        connectPromptReady: true,
-        shouldPromptForConnect: false,
-        connect: async () => {},
-        disconnect: () => {},
-        useLocalGatewayDefaults: () => {},
-        setGatewayUrl: () => {},
-        setToken: () => {},
-        setSelectedAdapterType: () => {},
-        clearError: () => {},
       }),
     }));
 
@@ -95,25 +89,12 @@ describe("useRuntimeConnection", () => {
 
   it("selects the local runtime provider from the active adapter type", async () => {
     vi.doMock("@/lib/gateway/GatewayClient", () => ({
-      useGatewayConnection: () => ({
-        client: {},
-        status: "connected",
+      buildAgentMainSessionKey: (agentId: string, mainKey: string) => `agent:${agentId}:${mainKey}`,
+      useGatewayConnection: () => createGatewayConnectionState({
         gatewayUrl: "http://127.0.0.1:7770",
-        token: "",
         selectedAdapterType: "local",
         detectedAdapterType: "local",
         activeAdapterType: "local",
-        localGatewayDefaults: null,
-        error: null,
-        connectPromptReady: true,
-        shouldPromptForConnect: false,
-        connect: async () => {},
-        disconnect: () => {},
-        useLocalGatewayDefaults: () => {},
-        setGatewayUrl: () => {},
-        setToken: () => {},
-        setSelectedAdapterType: () => {},
-        clearError: () => {},
       }),
     }));
 
@@ -137,25 +118,12 @@ describe("useRuntimeConnection", () => {
 
   it("selects the claw3d runtime provider from the active adapter type", async () => {
     vi.doMock("@/lib/gateway/GatewayClient", () => ({
-      useGatewayConnection: () => ({
-        client: {},
-        status: "connected",
+      buildAgentMainSessionKey: (agentId: string, mainKey: string) => `agent:${agentId}:${mainKey}`,
+      useGatewayConnection: () => createGatewayConnectionState({
         gatewayUrl: "http://127.0.0.1:3000/api/runtime/custom",
-        token: "",
         selectedAdapterType: "claw3d",
         detectedAdapterType: "claw3d",
         activeAdapterType: "claw3d",
-        localGatewayDefaults: null,
-        error: null,
-        connectPromptReady: true,
-        shouldPromptForConnect: false,
-        connect: async () => {},
-        disconnect: () => {},
-        useLocalGatewayDefaults: () => {},
-        setGatewayUrl: () => {},
-        setToken: () => {},
-        setSelectedAdapterType: () => {},
-        clearError: () => {},
       }),
     }));
 

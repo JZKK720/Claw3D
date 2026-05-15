@@ -18,6 +18,25 @@ import {
 } from "@/lib/skills/triggers";
 import { loadAgentSkillStatus } from "@/lib/skills/types";
 
+const resolveGrantedHelloScopes = (client: GatewayClient): ReadonlySet<string> | null => {
+  const scopes = client.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 const isSkillEnabledForAgent = (params: {
   allowlist: string[] | undefined;
   skillName: string;
@@ -72,6 +91,13 @@ export const useOfficeSkillTriggers = ({
     const load = async () => {
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
+      const grantedHelloScopes = resolveGrantedHelloScopes(client);
+      if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+        if (!cancelled && requestId === requestIdRef.current) {
+          setEnabledTriggersByAgentId({});
+        }
+        return;
+      }
       try {
         const triggerBySkillKey = new Map(
           packagedTriggers.map((trigger) => [trigger.skillKey, trigger]),

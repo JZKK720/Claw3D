@@ -10,7 +10,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/claw3d
 
 jobs:
   publish:
@@ -38,16 +37,18 @@ jobs:
         run: |
           set -euo pipefail
           tags=()
+          image_name="${REGISTRY}/$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/claw3d"
           ref_name="$(printf '%s' "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | tr '/_' '-' | tr -cd 'a-z0-9.-')"
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            tags+=("${IMAGE_NAME}:main")
+            tags+=("${image_name}:main")
+            tags+=("${image_name}:latest")
           elif [[ "${GITHUB_REF}" == refs/heads/* ]]; then
-            tags+=("${IMAGE_NAME}:${ref_name}")
+            tags+=("${image_name}:${ref_name}")
           fi
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
-            tags+=("${IMAGE_NAME}:${version}")
-            tags+=("${IMAGE_NAME}:latest")
+            tags+=("${image_name}:${version}")
+            tags+=("${image_name}:latest")
           fi
           {
             echo "value<<EOF"

@@ -86,6 +86,7 @@ export function SettingsPanel({
   const gatewayDisconnectDisabled = !isGatewayConnected;
   const gatewayConnectDisabled = normalizedGatewayUrl.length === 0;
   const tokenOptional =
+    selectedAdapterType === "ironclaw" ||
     selectedAdapterType === "hermes" ||
     selectedAdapterType === "demo" ||
     selectedAdapterType === "local" ||
@@ -137,6 +138,7 @@ export function SettingsPanel({
             [
               ["demo", "Demo"],
               ["hermes", "Hermes"],
+              ["ironclaw", "IronClaw"],
               ["local", "Local"],
               ["claw3d", "Claw3D"],
               ["custom", "Custom"],
@@ -170,7 +172,9 @@ export function SettingsPanel({
               value={gatewayUrl ?? ""}
               onChange={(event) => onGatewayUrlChange?.(event.target.value)}
               placeholder={
-                selectedAdapterType === "custom" ||
+                selectedAdapterType === "ironclaw"
+                  ? "http://localhost:3231"
+                  : selectedAdapterType === "custom" ||
                 selectedAdapterType === "local"
                   ? "http://localhost:7770"
                   : selectedAdapterType === "claw3d"

@@ -4,7 +4,7 @@ const http = require("http");
 const { randomUUID } = require("crypto");
 const { WebSocketServer } = require("ws");
 
-const ADAPTER_PORT = parseInt(process.env.DEMO_ADAPTER_PORT || "18789", 10);
+const ADAPTER_PORT = parseInt(process.env.DEMO_ADAPTER_PORT || "18792", 10);
 const MAIN_KEY = "main";
 const MODELS = [{ id: "demo/mock-office", name: "Mock Office", provider: "demo" }];
 

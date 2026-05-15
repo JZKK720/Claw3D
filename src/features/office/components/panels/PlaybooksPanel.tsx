@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentState } from "@/features/agents/state/store";
 import type { OfficeStandupController } from "@/features/office/hooks/useOfficeStandupController";
@@ -137,6 +137,30 @@ const formatRelativeDateTime = (timestampMs?: number) => {
   });
 };
 
+const isMissingReadScopeError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("missing scope: operator.read");
+};
+
+const resolveGrantedHelloScopes = (client: GatewayClient): ReadonlySet<string> | null => {
+  const scopes = client.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 export function PlaybooksPanel({
   client,
   status,
@@ -160,6 +184,7 @@ export function PlaybooksPanel({
   const [runBusyJobId, setRunBusyJobId] = useState<string | null>(null);
   const [deleteBusyJobId, setDeleteBusyJobId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const missingReadScopeRef = useRef(false);
 
   const agentById = useMemo(
     () => new Map(agents.map((agent) => [agent.agentId, agent])),
@@ -220,6 +245,21 @@ export function PlaybooksPanel({
 
   const loadJobs = useCallback(async () => {
     if (!cronEnabled || status !== "connected") {
+      missingReadScopeRef.current = false;
+      setJobs([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    const grantedHelloScopes = resolveGrantedHelloScopes(client);
+    if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+      missingReadScopeRef.current = true;
+      setJobs([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    if (missingReadScopeRef.current) {
       setJobs([]);
       setError(null);
       setLoading(false);
@@ -231,6 +271,12 @@ export function PlaybooksPanel({
       const result = await listCronJobs(client, { includeDisabled: true });
       setJobs(sortCronJobsByUpdatedAt(result.jobs));
     } catch (err) {
+      if (isMissingReadScopeError(err)) {
+        missingReadScopeRef.current = true;
+        setJobs([]);
+        setError(null);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Failed to load playbooks.";
       setError(message);
       if (!isGatewayDisconnectLikeError(err)) {

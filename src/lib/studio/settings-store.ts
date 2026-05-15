@@ -20,6 +20,7 @@ const SETTINGS_DIRNAME = "claw3d";
 const SETTINGS_FILENAME = "settings.json";
 const OPENCLAW_CONFIG_FILENAME = "openclaw.json";
 const DEFAULT_LOCAL_GATEWAY_PORT = 18789;
+const DEFAULT_LOCAL_GATEWAY_HOST = "localhost";
 
 export const resolveStudioSettingsPath = () =>
   path.join(resolveStateDir(), SETTINGS_DIRNAME, SETTINGS_FILENAME);
@@ -40,6 +41,28 @@ const buildGatewaySettings = (params: {
 });
 
 const buildLocalProfile = (url: string, token = ""): StudioGatewayProfile => ({ url, token });
+
+const resolveSecretFilePath = (rawPath: string | undefined): string | null => {
+  const trimmed = rawPath?.trim();
+  if (!trimmed) return null;
+  return path.isAbsolute(trimmed) ? trimmed : path.join(process.cwd(), trimmed);
+};
+
+const readSecretFile = (rawPath: string | undefined): string => {
+  try {
+    const filePath = resolveSecretFilePath(rawPath);
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    return fs.readFileSync(filePath, "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+
+const readEnvSecret = (valueEnvKey: string, fileEnvKey: string): string => {
+  const inlineValue = process.env[valueEnvKey]?.trim();
+  if (inlineValue) return inlineValue;
+  return readSecretFile(process.env[fileEnvKey]);
+};
 
 const readOpenclawGatewayDefaults = (): StudioGatewaySettings | null => {
   try {
@@ -73,6 +96,7 @@ const normalizeAdapterType = (value: string | undefined): StudioGatewayAdapterTy
   const normalized = value?.trim().toLowerCase();
   if (
     normalized === "openclaw" ||
+    normalized === "ironclaw" ||
     normalized === "hermes" ||
     normalized === "demo" ||
     normalized === "local" ||
@@ -86,25 +110,38 @@ const normalizeAdapterType = (value: string | undefined): StudioGatewayAdapterTy
 
 const readPortBasedGatewayProfile = (
   adapterType: Extract<StudioGatewayAdapterType, "hermes" | "demo">,
-  envKey: "HERMES_ADAPTER_PORT" | "DEMO_ADAPTER_PORT"
+  envKey: "HERMES_ADAPTER_PORT" | "DEMO_ADAPTER_PORT",
+  hostEnvKey: "HERMES_ADAPTER_HOST" | "DEMO_ADAPTER_HOST"
 ): StudioGatewayProfile | null => {
   const rawPort = process.env[envKey]?.trim();
   if (!rawPort) return null;
   const port = Number.parseInt(rawPort, 10);
   if (!Number.isFinite(port) || port <= 0) return null;
-  return buildLocalProfile(`ws://localhost:${port}`);
+  const host = process.env[hostEnvKey]?.trim() || DEFAULT_LOCAL_GATEWAY_HOST;
+  return buildLocalProfile(`ws://${host}:${port}`);
 };
 
 const buildEnvGatewayDefaults = (): StudioGatewaySettings | null => {
   const envUrl = process.env.CLAW3D_GATEWAY_URL?.trim();
-  const envToken = process.env.CLAW3D_GATEWAY_TOKEN?.trim() ?? "";
+  const envToken = readEnvSecret("CLAW3D_GATEWAY_TOKEN", "CLAW3D_GATEWAY_TOKEN_FILE");
   const envAdapterType =
     normalizeAdapterType(process.env.CLAW3D_GATEWAY_ADAPTER_TYPE) ?? "openclaw";
+  const ironclawUrl = process.env.IRONCLAW_GATEWAY_URL?.trim() ?? "";
+  const ironclawToken = readEnvSecret("IRONCLAW_GATEWAY_TOKEN", "IRONCLAW_GATEWAY_TOKEN_FILE");
 
-  const hermesProfile = readPortBasedGatewayProfile("hermes", "HERMES_ADAPTER_PORT");
-  const demoProfile = readPortBasedGatewayProfile("demo", "DEMO_ADAPTER_PORT");
+  const hermesProfile = readPortBasedGatewayProfile(
+    "hermes",
+    "HERMES_ADAPTER_PORT",
+    "HERMES_ADAPTER_HOST"
+  );
+  const demoProfile = readPortBasedGatewayProfile(
+    "demo",
+    "DEMO_ADAPTER_PORT",
+    "DEMO_ADAPTER_HOST"
+  );
 
   const profiles: Partial<Record<StudioGatewayAdapterType, StudioGatewayProfile>> = {};
+  if (ironclawUrl) profiles.ironclaw = buildLocalProfile(ironclawUrl, ironclawToken);
   if (hermesProfile) profiles.hermes = hermesProfile;
   if (demoProfile) profiles.demo = demoProfile;
 
@@ -118,9 +155,13 @@ const buildEnvGatewayDefaults = (): StudioGatewaySettings | null => {
     });
   }
 
-  const fallbackProfile = profiles.hermes ?? profiles.demo ?? null;
+  const fallbackProfile = profiles.ironclaw ?? profiles.hermes ?? profiles.demo ?? null;
   if (!fallbackProfile) return null;
-  const fallbackAdapterType = profiles.hermes ? "hermes" : "demo";
+  const fallbackAdapterType = profiles.ironclaw
+    ? "ironclaw"
+    : profiles.hermes
+      ? "hermes"
+      : "demo";
   return buildGatewaySettings({
     adapterType: fallbackAdapterType,
     url: fallbackProfile.url,
@@ -153,6 +194,23 @@ const mergeGatewayProfiles = (
   };
 };
 
+const resolveLocalGatewayProfile = (
+  adapterType: StudioGatewayAdapterType,
+  localDefaults: StudioGatewaySettings | null
+): StudioGatewayProfile | null => {
+  const explicitProfile = localDefaults?.profiles?.[adapterType];
+  if (explicitProfile?.url) {
+    return explicitProfile;
+  }
+  if (localDefaults?.adapterType === adapterType && localDefaults.url?.trim()) {
+    return {
+      url: localDefaults.url,
+      token: localDefaults.token ?? "",
+    };
+  }
+  return null;
+};
+
 export const loadLocalGatewayDefaults = (): StudioGatewaySettings | null => {
   const fromFile = readOpenclawGatewayDefaults();
   const fromEnv = buildEnvGatewayDefaults();
@@ -177,17 +235,41 @@ export const loadStudioSettings = (): StudioSettings => {
   const parsed = JSON.parse(raw) as unknown;
   const settings = normalizeStudioSettings(parsed);
   if (!settings.gateway?.token) {
-    const gateway = loadLocalGatewayDefaults();
-    if (gateway) {
+    const localGatewayDefaults = loadLocalGatewayDefaults();
+    if (localGatewayDefaults) {
+      if (!settings.gateway?.url?.trim()) {
+        return {
+          ...settings,
+          gateway: localGatewayDefaults,
+        };
+      }
+
+      const selectedAdapterType = settings.gateway.adapterType;
+      const selectedGatewayProfile = resolveLocalGatewayProfile(
+        selectedAdapterType,
+        localGatewayDefaults
+      );
+      const mergedProfiles: Partial<Record<StudioGatewayAdapterType, StudioGatewayProfile>> = {
+        ...(localGatewayDefaults.profiles ?? {}),
+        ...(settings.gateway.profiles ?? {}),
+      };
+      mergedProfiles[selectedAdapterType] = {
+        url: settings.gateway.url.trim(),
+        token:
+          mergedProfiles[selectedAdapterType]?.token ??
+          selectedGatewayProfile?.token ??
+          "",
+      };
+
       return {
         ...settings,
-        gateway: settings.gateway?.url?.trim()
-          ? {
-              url: settings.gateway.url.trim(),
-              token: gateway.token,
-              adapterType: settings.gateway.adapterType,
-            }
-          : gateway,
+        gateway: {
+          ...settings.gateway,
+          url: settings.gateway.url.trim(),
+          token: mergedProfiles[selectedAdapterType]?.token ?? "",
+          adapterType: selectedAdapterType,
+          profiles: mergedProfiles,
+        },
       };
     }
   }

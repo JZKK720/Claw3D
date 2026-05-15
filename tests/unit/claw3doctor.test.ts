@@ -26,10 +26,10 @@ describe("claw3doctor core", () => {
       settings: {
         gateway: {
           adapterType: "hermes",
-          url: "ws://localhost:18790",
+          url: "ws://localhost:18791",
           token: "",
           profiles: {
-            hermes: { url: "ws://localhost:18790", token: "" },
+            hermes: { url: "ws://localhost:18791", token: "" },
             openclaw: { url: "ws://localhost:18789", token: "file-token" },
           },
         },
@@ -44,7 +44,7 @@ describe("claw3doctor core", () => {
 
     expect(runtime).toMatchObject({
       adapterType: "hermes",
-      gatewayUrl: "ws://localhost:18790",
+      gatewayUrl: "ws://localhost:18791",
       tokenConfigured: false,
     });
     const profiles = runtime.profiles as Record<

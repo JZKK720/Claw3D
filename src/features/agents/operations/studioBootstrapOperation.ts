@@ -28,6 +28,7 @@ export async function runStudioBootstrapLoadOperation(params: {
   client: GatewayClientLike;
   gatewayUrl: string;
   cachedConfigSnapshot: GatewayModelPolicySnapshot | null;
+  supportsConfig?: boolean;
   loadStudioSettings: () => Promise<StudioSettings | StudioSettingsPublic | null>;
   isDisconnectLikeError: (err: unknown) => boolean;
   preferredSelectedAgentId: string | null;
@@ -39,6 +40,7 @@ export async function runStudioBootstrapLoadOperation(params: {
       client: params.client,
       gatewayUrl: params.gatewayUrl,
       cachedConfigSnapshot: params.cachedConfigSnapshot,
+      supportsConfig: params.supportsConfig,
       loadStudioSettings: params.loadStudioSettings,
       isDisconnectLikeError: params.isDisconnectLikeError,
       logError: params.logError,

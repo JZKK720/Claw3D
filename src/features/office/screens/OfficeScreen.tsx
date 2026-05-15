@@ -72,8 +72,10 @@ import {
   type RuntimeAgentMessageMode,
 } from "@/lib/runtime/agentMessaging";
 import {
+  buildLobbyRuntimeRosterEntries,
   buildFloorRosterState,
   createFloorRosterCache,
+  type LobbyRuntimeRosterEntry,
 } from "@/lib/office/floorRoster";
 import {
   getOfficeFloor,
@@ -268,6 +270,27 @@ const OFFICE_DANCE_MS = 60_000;
 const GATEWAY_LOADING_OVERLAY_DELAY_MS = 1_200;
 const GATEWAY_CONNECT_OVERLAY_DELAY_MS = 1_500;
 
+const resolveGrantedHelloScopes = (provider: {
+  getLastHello?: () => { auth?: { scopes?: string[] } } | null;
+} | null | undefined): ReadonlySet<string> | null => {
+  const scopes = provider?.getLastHello?.()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 const getLatestUserRequestForAgent = (
   agent: AgentState,
 ): { text: string; requestKey: string } | null => {
@@ -330,6 +353,12 @@ type PendingFloorRuntimeSwitch = {
   adapterType: StudioGatewayAdapterType;
   gatewayUrl: string;
   token: string;
+};
+
+type PendingFloorAgentFocus = {
+  floorId: FloorId;
+  agentId: string;
+  openChat: boolean;
 };
 
 type PhoneCallSpeakPayload = {
@@ -589,6 +618,18 @@ const mapAgentToOffice = (agent: AgentState): OfficeAgent => {
   };
 };
 
+const mapLobbyRuntimeRosterEntryToOffice = (
+  entry: LobbyRuntimeRosterEntry,
+): OfficeAgent => ({
+  id: entry.lobbyAgentId,
+  name: entry.displayName,
+  subtitle: [entry.floorShortLabel, entry.role].filter(Boolean).join(" • ") || null,
+  status: "idle",
+  color: stringToColor(entry.lobbyAgentId),
+  item: getDeterministicItem(entry.lobbyAgentId),
+  avatarProfile: null,
+});
+
 const mapRemotePresenceAgentToOffice = (agent: {
   agentId: string;
   name: string;
@@ -680,8 +721,9 @@ type RemoteChatSessionState = {
 type ChatRosterEntry = {
   id: string;
   name: string;
-  kind: "local" | "remote";
+  kind: "local" | "remote" | "lobby-runtime";
   isRunning: boolean;
+  badgeLabel?: string | null;
 };
 
 const EMPTY_REMOTE_CHAT_SESSION: RemoteChatSessionState = {
@@ -984,6 +1026,7 @@ export function OfficeScreen({
   const runtimeSupportsSkills = supportsCapability("skills");
   const runtimeSupportsApprovals = supportsCapability("approvals");
   const runtimeSupportsCron = supportsCapability("cron");
+  const runtimeSupportsConfig = supportsCapability("config");
   const runtimeSupportsModels = supportsCapability("models");
   const runtimeSupportsRunLifecycle = supportsCapability("runtime-agent-events");
   const { state, dispatch, hydrateAgents, setError, setLoading } =
@@ -1119,6 +1162,7 @@ export function OfficeScreen({
   );
   const activeFloorIdRef = useRef<FloorId>("lobby");
   const floorRosterCacheRef = useRef(floorRosterCache);
+  const pendingFloorAgentFocusRef = useRef<PendingFloorAgentFocus | null>(null);
   const [gatewayModels, setGatewayModels] = useState<GatewayModelChoice[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
@@ -1157,6 +1201,31 @@ export function OfficeScreen({
     () => getOfficeFloor(resolveActiveOfficeFloorId(activeFloorId)),
     [activeFloorId],
   );
+  const lobbyRuntimeRosterEntries = useMemo(
+    () => buildLobbyRuntimeRosterEntries(floorRosterCache),
+    [floorRosterCache],
+  );
+  const lobbyRuntimeRosterTargetsByAgentId = useMemo(
+    () =>
+      Object.fromEntries(
+        lobbyRuntimeRosterEntries.map((entry) => [
+          entry.lobbyAgentId,
+          {
+            floorId: entry.floorId,
+            sourceAgentId: entry.sourceAgentId,
+          },
+        ]),
+      ) as Record<string, { floorId: FloorId; sourceAgentId: string }>,
+    [lobbyRuntimeRosterEntries],
+  );
+  const hasCachedRuntimeRoster = useMemo(
+    () =>
+      Object.entries(floorRosterCache).some(([floorId, roster]) => {
+        const floor = getOfficeFloor(floorId as FloorId);
+        return floor.kind === "runtime" && roster.entries.length > 0;
+      }),
+    [floorRosterCache],
+  );
 
   useEffect(() => {
     activeFloorIdRef.current = activeFloorId;
@@ -1191,6 +1260,31 @@ export function OfficeScreen({
     }
   }, [status]);
 
+  const focusLocalAgent = useCallback(
+    (
+      agentId: string,
+      options?: { openChat?: boolean; persistFloorId?: FloorId; selectStore?: boolean },
+    ) => {
+      setSelectedChatAgentId(agentId);
+      if (options?.openChat !== false) {
+        setChatOpen(true);
+      }
+      if (options?.selectStore !== false) {
+        dispatch({ type: "selectAgent", agentId });
+      }
+      setFloorRosterCache((prev) => {
+        const targetFloorId = options?.persistFloorId ?? activeFloorIdRef.current;
+        const current = prev[targetFloorId];
+        if (!current || current.selectedAgentId === agentId) return prev;
+        return {
+          ...prev,
+          [targetFloorId]: { ...current, selectedAgentId: agentId },
+        };
+      });
+    },
+    [dispatch],
+  );
+
   // Auto-navigate away from lobby when a real adapter connects.
   // Uses a ref flag instead of previousGatewayStatusRef so the effect can
   // re-run when detectedAdapterType arrives in a later render (after status
@@ -1198,6 +1292,7 @@ export function OfficeScreen({
   useEffect(() => {
     if (status !== "connected") return;
     if (didAutoNavigateFromLobbyRef.current) return;
+    if (hasCachedRuntimeRoster) return;
     if (activeFloor.kind !== "lobby" || activeFloor.provider !== "demo") return;
 
     const connectedProvider =
@@ -1223,11 +1318,27 @@ export function OfficeScreen({
     activeFloor.kind,
     activeFloor.provider,
     detectedAdapterType,
+    hasCachedRuntimeRoster,
     selectedAdapterType,
     setSelectedAdapterType,
     settingsCoordinator,
     status,
   ]);
+
+  useEffect(() => {
+    const pending = pendingFloorAgentFocusRef.current;
+    if (!pending) return;
+    if (pending.floorId !== activeFloor.id) return;
+    if (!agentsLoaded) return;
+    if (!state.agents.some((agent) => agent.agentId === pending.agentId)) {
+      return;
+    }
+    pendingFloorAgentFocusRef.current = null;
+    focusLocalAgent(pending.agentId, {
+      openChat: pending.openChat,
+      persistFloorId: pending.floorId,
+    });
+  }, [activeFloor.id, agentsLoaded, focusLocalAgent, state.agents]);
 
   useEffect(() => {
     if (!pendingFloorRuntimeSwitch) return;
@@ -1412,35 +1523,23 @@ export function OfficeScreen({
     },
     [dispatch, gatewayUrl, settingsCoordinator],
   );
-  const focusLocalAgent = useCallback(
-    (
-      agentId: string,
-      options?: { openChat?: boolean; persistFloorId?: FloorId; selectStore?: boolean },
-    ) => {
-      setSelectedChatAgentId(agentId);
-      if (options?.openChat !== false) {
-        setChatOpen(true);
-      }
-      if (options?.selectStore !== false) {
-        dispatch({ type: "selectAgent", agentId });
-      }
-      setFloorRosterCache((prev) => {
-        const targetFloorId = options?.persistFloorId ?? activeFloorIdRef.current;
-        const current = prev[targetFloorId];
-        if (!current || current.selectedAgentId === agentId) return prev;
-        return {
-          ...prev,
-          [targetFloorId]: { ...current, selectedAgentId: agentId },
-        };
-      });
-    },
-    [dispatch],
-  );
   const handleSelectFloor = useCallback(
-    async (floorId: FloorId) => {
+    async (
+      floorId: FloorId,
+      options?: { preferredAgentId?: string | null; openChat?: boolean }
+    ) => {
       const resolved = resolveActiveOfficeFloorId(floorId);
       const floor = getOfficeFloor(resolved);
       const targetRosterState = floorRosterCacheRef.current[resolved];
+
+      if (floor.kind === "lobby") {
+        pendingFloorAgentFocusRef.current = null;
+        setActiveFloorId(resolved);
+        settingsCoordinator.schedulePatch({ activeFloorId: resolved }, 0);
+        setOfficeCameraCenterSignal((current) => current + 1);
+        return;
+      }
+
       setAgentsLoaded(false);
       setActiveFloorId(resolved);
       settingsCoordinator.schedulePatch({ activeFloorId: resolved }, 0);
@@ -1481,10 +1580,40 @@ export function OfficeScreen({
       // Guard: if this is a runtime floor and there's no gateway URL to connect to,
       // bail back to lobby rather than entering a connect-hang limbo state.
       if (floor.kind === "runtime" && !nextGatewayUrl.trim()) {
+        pendingFloorAgentFocusRef.current = null;
         setActiveFloorId("lobby");
         settingsCoordinator.schedulePatch({ activeFloorId: "lobby" }, 0);
         setAgentsLoaded(true);
         return;
+      }
+
+      const preferredAgentId =
+        options?.preferredAgentId?.trim() ||
+        targetRosterState?.selectedAgentId ||
+        targetRosterState?.entries[0]?.agentId ||
+        null;
+
+      if (preferredAgentId) {
+        pendingFloorAgentFocusRef.current = {
+          floorId: resolved,
+          agentId: preferredAgentId,
+          openChat: options?.openChat !== false,
+        };
+        setFloorRosterCache((previous) => {
+          const current = previous[resolved];
+          if (!current || current.selectedAgentId === preferredAgentId) {
+            return previous;
+          }
+          return {
+            ...previous,
+            [resolved]: {
+              ...current,
+              selectedAgentId: preferredAgentId,
+            },
+          };
+        });
+      } else {
+        pendingFloorAgentFocusRef.current = null;
       }
 
       setSelectedAdapterType(adapterType);
@@ -1496,22 +1625,9 @@ export function OfficeScreen({
         gatewayUrl: nextGatewayUrl,
         token: nextToken,
       });
-
-      const preferredAgentId =
-        targetRosterState?.selectedAgentId ??
-        targetRosterState?.entries[0]?.agentId ??
-        null;
-      if (preferredAgentId) {
-        focusLocalAgent(preferredAgentId, {
-          openChat: false,
-          persistFloorId: resolved,
-          selectStore: false,
-        });
-      }
     },
     [
       adapterProfiles,
-      focusLocalAgent,
       gatewayUrl,
       localGatewayDefaults,
       setGatewayUrl,
@@ -1776,6 +1892,7 @@ export function OfficeScreen({
           client: provider,
           gatewayUrl,
           cachedConfigSnapshot: gatewayConfigSnapshot.current,
+          supportsConfig: runtimeSupportsConfig,
           loadStudioSettings: () => loadStudioSettings(settingsLoadOptions),
           isDisconnectLikeError: isGatewayDisconnectLikeError,
           preferredSelectedAgentId: null,
@@ -2521,6 +2638,20 @@ export function OfficeScreen({
       const requestedSessionKey = params.sessionKey?.trim() ?? "";
       if (requestedSessionKey) {
         try {
+          const grantedHelloScopes = resolveGrantedHelloScopes(provider);
+          if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+            if (debugEnabled) {
+              console.info(
+                "[office-debug] Skipped transport session history refresh due to missing operator.read.",
+                {
+                  agentId: params.agentId,
+                  requestedSessionKey,
+                  reason: params.reason,
+                },
+              );
+            }
+            return;
+          }
           const history = await provider.call<{
             messages?: Record<string, unknown>[];
           }>("chat.history", {
@@ -3035,6 +3166,11 @@ export function OfficeScreen({
   useEffect(() => {
     if (status !== "connected") return;
     if (!runtimeSupportsModels) return;
+    const grantedHelloScopes = resolveGrantedHelloScopes(provider);
+    if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+      setGatewayModels([]);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -3653,9 +3789,17 @@ export function OfficeScreen({
 
   const handleOpenAgentChat = useCallback(
     (agentId: string) => {
+      const lobbyEntry = lobbyRuntimeRosterTargetsByAgentId[agentId] ?? null;
+      if (lobbyEntry) {
+        void handleSelectFloor(lobbyEntry.floorId, {
+          preferredAgentId: lobbyEntry.sourceAgentId,
+          openChat: true,
+        });
+        return;
+      }
       focusChatTarget(agentId);
     },
-    [focusChatTarget],
+    [focusChatTarget, handleSelectFloor, lobbyRuntimeRosterTargetsByAgentId],
   );
   const updateRemoteChatSession = useCallback(
     (
@@ -4292,6 +4436,13 @@ export function OfficeScreen({
     state.agents,
     workingUntilByAgentId,
   ]);
+  const visibleOfficeAgents = useMemo(
+    () =>
+      activeFloor.kind === "lobby"
+        ? lobbyRuntimeRosterEntries.map(mapLobbyRuntimeRosterEntryToOffice)
+        : officeAgents,
+    [activeFloor.kind, lobbyRuntimeRosterEntries, officeAgents],
+  );
   const streamingTextByAgentId = useMemo(() => {
     const map: Record<string, string | null> = {};
     for (const agent of state.agents) {
@@ -4347,22 +4498,37 @@ export function OfficeScreen({
       ),
     [remoteOfficeSnapshot]
   );
+  const localChatRosterEntries = useMemo<ChatRosterEntry[]>(
+    () =>
+      activeFloor.kind === "lobby"
+        ? lobbyRuntimeRosterEntries.map((entry) => ({
+            id: entry.lobbyAgentId,
+            name: entry.displayName,
+            kind: "lobby-runtime" as const,
+            isRunning: false,
+            badgeLabel: entry.floorShortLabel,
+          }))
+        : state.agents.map((agent) => ({
+            id: agent.agentId,
+            name: agent.name || agent.agentId,
+            kind: "local" as const,
+            isRunning: agent.status === "running",
+            badgeLabel: null,
+          })),
+    [activeFloor.kind, lobbyRuntimeRosterEntries, state.agents],
+  );
   const chatRosterEntries = useMemo<ChatRosterEntry[]>(
     () => [
-      ...state.agents.map((agent) => ({
-        id: agent.agentId,
-        name: agent.name || agent.agentId,
-        kind: "local" as const,
-        isRunning: agent.status === "running",
-      })),
+      ...localChatRosterEntries,
       ...remoteOfficeAgents.map((agent) => ({
         id: agent.id,
         name: agent.name || agent.id,
         kind: "remote" as const,
         isRunning: agent.status === "working",
+        badgeLabel: null,
       })),
     ],
-    [remoteOfficeAgents, state.agents],
+    [localChatRosterEntries, remoteOfficeAgents],
   );
   const focusedRemoteChatTarget = selectedChatAgentId
     ? (remoteOfficeAgents.find((agent) => agent.id === selectedChatAgentId) ?? null)
@@ -4371,8 +4537,8 @@ export function OfficeScreen({
     ? (remoteChatByAgentId[focusedRemoteChatTarget.id] ?? EMPTY_REMOTE_CHAT_SESSION)
     : null;
   const allVisibleAgents = useMemo(
-    () => [...officeAgents, ...remoteOfficeAgents],
-    [officeAgents, remoteOfficeAgents],
+    () => [...visibleOfficeAgents, ...remoteOfficeAgents],
+    [remoteOfficeAgents, visibleOfficeAgents],
   );
   const remoteOfficeVisible =
     remoteOfficeEnabled &&
@@ -4697,10 +4863,16 @@ export function OfficeScreen({
     (agent) => agent.hasUnseenActivity,
   ).length;
   const showEmptyFleetBanner =
-    status === "connected" && agentsLoaded && state.agents.length === 0;
+    status === "connected" &&
+    agentsLoaded &&
+    (activeFloor.kind === "lobby"
+      ? lobbyRuntimeRosterEntries.length === 0
+      : state.agents.length === 0);
   const emptyFleetMessage =
     state.error?.trim() ||
-    "Connected to the gateway, but no agents were loaded into the office.";
+    (activeFloor.kind === "lobby"
+      ? "No cached runtime agents are available in the lobby yet. Visit a runtime floor once to add it to the shared lobby."
+      : "Connected to the gateway, but no agents were loaded into the office.");
 
   return (
     <main className="relative h-full w-full overflow-hidden bg-black">
@@ -4748,6 +4920,7 @@ export function OfficeScreen({
           void handleSelectFloor(floorId);
         }}
         activeAdapterType={(selectedAdapterType as FloorProvider) ?? null}
+        showAllEnabledFloors={activeFloor.kind === "lobby"}
       />
       <section className="relative h-full min-h-0 min-w-0 overflow-hidden">
         <RetroOffice3D
@@ -4837,6 +5010,14 @@ export function OfficeScreen({
             }
           }}
           onMonitorSelect={(agentId) => {
+            const lobbyEntry = agentId ? lobbyRuntimeRosterTargetsByAgentId[agentId] ?? null : null;
+            if (lobbyEntry) {
+              void handleSelectFloor(lobbyEntry.floorId, {
+                preferredAgentId: lobbyEntry.sourceAgentId,
+                openChat: false,
+              });
+              return;
+            }
             setMonitorAgentId(agentId);
             if (agentId && !isRemoteOfficeAgentId(agentId)) {
               focusLocalAgent(agentId, { openChat: false });
@@ -4846,12 +5027,20 @@ export function OfficeScreen({
             handleOpenAgentChat(agentId);
           }}
           onAddAgent={handleOpenCreateAgentWizard}
-          onAgentEdit={(agentId) => {
-            openAgentEditor(agentId, "avatar");
-          }}
-          onAgentDelete={(agentId) => {
-            void handleDeleteAgent(agentId);
-          }}
+          onAgentEdit={
+            activeFloor.kind === "lobby"
+              ? undefined
+              : (agentId) => {
+                  openAgentEditor(agentId, "avatar");
+                }
+          }
+          onAgentDelete={
+            activeFloor.kind === "lobby"
+              ? undefined
+              : (agentId) => {
+                  void handleDeleteAgent(agentId);
+                }
+          }
           onDeskAssignmentChange={handleDeskAssignmentChange}
           onDeskAssignmentsReset={handleDeskAssignmentsReset}
           onGithubReviewDismiss={() => {
@@ -5476,6 +5665,10 @@ export function OfficeScreen({
                         {agent.kind === "remote" ? (
                           <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-cyan-300/60">
                             Remote
+                          </span>
+                        ) : agent.kind === "lobby-runtime" && agent.badgeLabel ? (
+                          <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-amber-300/70">
+                            {agent.badgeLabel}
                           </span>
                         ) : null}
                         <span className="sr-only">

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentStoreSeed } from "@/features/agents/state/store";
 import {
+  buildLobbyRuntimeRosterEntries,
   buildFloorRosterErrorState,
   buildFloorRosterState,
+  createLobbyRuntimeAgentId,
   createFloorRosterCache,
   createFloorRosterEntry,
   defaultFloorRosterState,
@@ -111,5 +113,38 @@ describe("floorRoster", () => {
       }),
     );
     expect(state.entries[0]?.displayName).toBe("Hermes Prime");
+  });
+
+  it("builds a merged lobby roster from cached runtime floors", () => {
+    const cache = createFloorRosterCache();
+    cache["openclaw-ground"] = buildFloorRosterState({
+      floorId: "openclaw-ground",
+      result: {
+        seeds: [makeSeed()],
+        suggestedSelectedAgentId: "agent-1",
+      },
+    });
+    cache["ironclaw-runtime"] = buildFloorRosterState({
+      floorId: "ironclaw-runtime",
+      result: {
+        seeds: [makeSeed({ agentId: "agent-2", name: "forge", identityName: "Forge" })],
+        suggestedSelectedAgentId: "agent-2",
+      },
+    });
+
+    expect(buildLobbyRuntimeRosterEntries(cache)).toEqual([
+      expect.objectContaining({
+        floorId: "openclaw-ground",
+        provider: "openclaw",
+        sourceAgentId: "agent-1",
+        lobbyAgentId: createLobbyRuntimeAgentId("openclaw-ground", "agent-1"),
+      }),
+      expect.objectContaining({
+        floorId: "ironclaw-runtime",
+        provider: "ironclaw",
+        sourceAgentId: "agent-2",
+        lobbyAgentId: createLobbyRuntimeAgentId("ironclaw-runtime", "agent-2"),
+      }),
+    ]);
   });
 });

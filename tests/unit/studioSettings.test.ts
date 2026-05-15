@@ -433,8 +433,12 @@ describe("studio settings normalization", () => {
       url: "http://localhost:7770",
       token: "",
     });
+    expect(resolveDefaultStudioGatewayProfile("hermes", null)).toEqual({
+      url: "ws://localhost:18791",
+      token: "",
+    });
     expect(resolveDefaultStudioGatewayProfile("demo", null)).toEqual({
-      url: "ws://localhost:18789",
+      url: "ws://localhost:18792",
       token: "",
     });
   });

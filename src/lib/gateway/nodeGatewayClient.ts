@@ -30,6 +30,7 @@ type PendingRequest = {
 const CONNECT_TIMEOUT_MS = 8_000;
 const REQUEST_TIMEOUT_MS = 12_000;
 const INITIAL_CONNECT_DELAY_MS = 750;
+const GATEWAY_PROTOCOL_VERSION = 4;
 const GATEWAY_ROLE = "operator";
 const GATEWAY_SCOPES = ["operator.read", "operator.admin", "operator.approvals", "operator.pairing"];
 const GATEWAY_CLIENT_ID = "openclaw-control-ui";
@@ -120,8 +121,8 @@ const buildConnectParams = async (params: {
   });
   const signature = await signAsync(new TextEncoder().encode(payload), params.deviceIdentity.privateKey);
   return {
-  minProtocol: 3,
-  maxProtocol: 3,
+  minProtocol: GATEWAY_PROTOCOL_VERSION,
+  maxProtocol: GATEWAY_PROTOCOL_VERSION,
   client: {
     id: GATEWAY_CLIENT_ID,
     version: "dev",

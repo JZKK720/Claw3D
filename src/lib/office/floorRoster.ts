@@ -36,6 +36,15 @@ export type FloorRosterHydrationResult = {
   suggestedSelectedAgentId: string | null;
 };
 
+export type LobbyRuntimeRosterEntry = FloorRosterEntry & {
+  floorId: FloorId;
+  floorLabel: string;
+  floorShortLabel: string;
+  provider: FloorProvider;
+  sourceAgentId: string;
+  lobbyAgentId: string;
+};
+
 export const createFloorRosterEntry = (seed: AgentStoreSeed): FloorRosterEntry => {
   const runtimeName = seed.runtimeName?.trim() || seed.name.trim();
   const identityName = seed.identityName?.trim() || null;
@@ -74,6 +83,31 @@ export const createFloorRosterCache = (): Record<FloorId, FloorRosterState> => {
     cache[floor.id] = defaultFloorRosterState(floor.id);
   }
   return cache;
+};
+
+export const createLobbyRuntimeAgentId = (floorId: FloorId, agentId: string): string =>
+  `lobby:${floorId}:${agentId}`;
+
+export const buildLobbyRuntimeRosterEntries = (
+  cache: Record<FloorId, FloorRosterState>
+): LobbyRuntimeRosterEntry[] => {
+  const entries: LobbyRuntimeRosterEntry[] = [];
+  for (const floor of OFFICE_FLOORS) {
+    if (!floor.enabled || floor.kind !== "runtime") continue;
+    const rosterEntries = cache[floor.id]?.entries ?? [];
+    for (const entry of rosterEntries) {
+      entries.push({
+        ...entry,
+        floorId: floor.id,
+        floorLabel: floor.label,
+        floorShortLabel: floor.shortLabel,
+        provider: floor.provider,
+        sourceAgentId: entry.agentId,
+        lobbyAgentId: createLobbyRuntimeAgentId(floor.id, entry.agentId),
+      });
+    }
+  }
+  return entries;
 };
 
 export const buildFloorRosterState = (params: {

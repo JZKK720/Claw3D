@@ -125,7 +125,10 @@ const resolveOriginForUpstream = (upstreamUrl) => {
   const url = new URL(upstreamUrl);
   const proto = url.protocol === "wss:" ? "https:" : "http:";
   const hostname =
-    url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "0.0.0.0"
+    url.hostname === "127.0.0.1" ||
+    url.hostname === "::1" ||
+    url.hostname === "0.0.0.0" ||
+    url.hostname === "host.docker.internal"
       ? "localhost"
       : url.hostname;
   const host = url.port ? `${hostname}:${url.port}` : hostname;
@@ -228,14 +231,14 @@ function createGatewayProxy(options) {
     };
 
     const forwardConnectFrame = (frame) => {
-      const browserHasAuth =
+      const browserHasSharedAuth =
         hasNonEmptyToken(frame.params) ||
         hasNonEmptyPassword(frame.params) ||
-        hasNonEmptyDeviceToken(frame.params) ||
-        hasCompleteDeviceAuth(frame.params);
+        hasNonEmptyDeviceToken(frame.params);
+      const browserHasAnyAuth = browserHasSharedAuth || hasCompleteDeviceAuth(frame.params);
 
       const requiresToken = upstreamAdapterType === "openclaw";
-      if (requiresToken && !upstreamToken && !browserHasAuth) {
+      if (requiresToken && !upstreamToken && !browserHasAnyAuth) {
         sendConnectError(
           "studio.gateway_token_missing",
           "Upstream gateway token is not configured on the Studio host."
@@ -243,7 +246,8 @@ function createGatewayProxy(options) {
         return;
       }
 
-      const baseConnectFrame = browserHasAuth
+      const injectedHostToken = !browserHasSharedAuth && Boolean(upstreamToken);
+      const baseConnectFrame = browserHasSharedAuth || !upstreamToken
         ? frame
         : {
             ...frame,
@@ -260,13 +264,14 @@ function createGatewayProxy(options) {
       if (
         upstreamAdapterType === "openclaw" &&
         clientId === "openclaw-control-ui" &&
-        !hasDeviceAuth
+        (!hasDeviceAuth || injectedHostToken)
       ) {
         client.id = "webchat-ui";
         connectParams.client = client;
-        if (isObject(connectParams.device) && !hasCompleteDeviceAuth(connectParams)) {
-          delete connectParams.device;
-        }
+      }
+
+      if (upstreamAdapterType === "openclaw" && injectedHostToken && isObject(connectParams.device)) {
+        delete connectParams.device;
       }
 
       const connectFrame = {
@@ -535,4 +540,4 @@ function createGatewayProxy(options) {
   return { wss, handleUpgrade };
 }
 
-module.exports = { createGatewayProxy };
+module.exports = { createGatewayProxy, resolveOriginForUpstream };

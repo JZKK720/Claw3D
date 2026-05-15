@@ -11,6 +11,38 @@ import {
 } from "@/lib/runtime/types";
 import type { StudioSettingsCoordinator } from "@/lib/studio/coordinator";
 
+const resolveScopedRuntimeCapabilities = (
+  provider: RuntimeProvider
+): ReadonlySet<RuntimeCapability> => {
+  const scopes = provider.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes) || scopes.length === 0) {
+    return provider.capabilities;
+  }
+
+  const grantedScopes = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    grantedScopes.add(trimmed);
+  }
+
+  const capabilities = new Set(provider.capabilities);
+  if (!grantedScopes.has("operator.read")) {
+    capabilities.delete("config");
+    capabilities.delete("models");
+    capabilities.delete("skills");
+    capabilities.delete("cron");
+  }
+  if (
+    !grantedScopes.has("operator.admin") &&
+    !grantedScopes.has("operator.approvals")
+  ) {
+    capabilities.delete("approvals");
+  }
+  return capabilities;
+};
+
 export type RuntimeConnectionState = GatewayConnectionState & {
   provider: RuntimeProvider;
   providerId: RuntimeProvider["id"];
@@ -25,10 +57,20 @@ export const useRuntimeConnection = (
 ): RuntimeConnectionState => {
   const gateway = useGatewayConnection(settingsCoordinator);
   const provider = useMemo(
-    () => createRuntimeProvider(gateway.activeAdapterType, gateway.client, gateway.gatewayUrl),
-    [gateway.activeAdapterType, gateway.client, gateway.gatewayUrl]
+    () =>
+      createRuntimeProvider(
+        gateway.activeAdapterType,
+        gateway.client,
+        gateway.gatewayUrl,
+        gateway.token
+      ),
+    [gateway.activeAdapterType, gateway.client, gateway.gatewayUrl, gateway.token]
   );
-  const capabilities = provider.capabilities;
+  const helloScopeKey = provider.getLastHello()?.auth?.scopes?.join("|") ?? "";
+  const capabilities = useMemo(
+    () => resolveScopedRuntimeCapabilities(provider),
+    [helloScopeKey, provider]
+  );
 
   return {
     ...gateway,

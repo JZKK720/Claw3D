@@ -520,6 +520,7 @@ const AgentsPageScreen = () => {
         client: provider,
         gatewayUrl,
         cachedConfigSnapshot: gatewayConfigSnapshot,
+        supportsConfig: runtimeSupportsConfig,
         loadStudioSettings,
         isDisconnectLikeError: isGatewayDisconnectLikeError,
         preferredSelectedAgentId: preferredSelectedAgentIdRef.current,
@@ -549,6 +550,7 @@ const AgentsPageScreen = () => {
     gatewayUrl,
     gatewayConfigSnapshot,
     loadStudioSettings,
+    runtimeSupportsConfig,
     status,
   ]);
 

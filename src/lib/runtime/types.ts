@@ -31,6 +31,7 @@ export type RuntimeCapability =
 
 export type RuntimeProviderId =
   | "openclaw"
+  | "ironclaw"
   | "hermes"
   | "demo"
   | "local"
@@ -102,6 +103,7 @@ export interface RuntimeProvider {
   connect(options: GatewayConnectOptions): Promise<void>;
   disconnect(): void;
   call<T = unknown>(method: string, params: unknown): Promise<T>;
+  getLastHello(): ReturnType<GatewayClient["getLastHello"]>;
   onStatus(handler: (status: RuntimeStatus) => void): () => void;
   onGap(handler: (info: GatewayGapInfo) => void): () => void;
   onEvent(handler: (event: EventFrame) => void): () => void;

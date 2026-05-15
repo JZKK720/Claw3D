@@ -27,6 +27,30 @@ type MarketplaceMessage = {
   text: string;
 };
 
+const isMissingReadScopeError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("missing scope: operator.read");
+};
+
+const resolveGrantedHelloScopes = (client: GatewayClient): ReadonlySet<string> | null => {
+  const scopes = client.getLastHello()?.auth?.scopes;
+  if (!Array.isArray(scopes)) return null;
+
+  const normalized = new Set<string>();
+  for (const scope of scopes) {
+    if (typeof scope !== "string") continue;
+    const trimmed = scope.trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+  }
+  return normalized;
+};
+
+const hasGrantedHelloScope = (
+  grantedScopes: ReadonlySet<string> | null,
+  scope: string,
+) => grantedScopes === null || grantedScopes.has(scope);
+
 export const useOfficeSkillsMarketplace = ({
   client,
   status,
@@ -45,6 +69,7 @@ export const useOfficeSkillsMarketplace = ({
   onSkillActivityEnd?: (agentId: string) => void;
 }) => {
   const requestIdRef = useRef(0);
+  const missingReadScopeRef = useRef(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
     preferredAgentId ?? null,
   );
@@ -91,9 +116,26 @@ export const useOfficeSkillsMarketplace = ({
     async (agentId: string) => {
       const resolvedAgentId = agentId.trim();
       if (!enabled || !resolvedAgentId || status !== "connected") {
+        missingReadScopeRef.current = false;
         setSkillsReport(null);
         setSkillsAllowlist(undefined);
         setLoading(false);
+        return;
+      }
+      const grantedHelloScopes = resolveGrantedHelloScopes(client);
+      if (!hasGrantedHelloScope(grantedHelloScopes, "operator.read")) {
+        missingReadScopeRef.current = true;
+        setSkillsReport(null);
+        setSkillsAllowlist(undefined);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+      if (missingReadScopeRef.current) {
+        setSkillsReport(null);
+        setSkillsAllowlist(undefined);
+        setLoading(false);
+        setError(null);
         return;
       }
 
@@ -116,6 +158,13 @@ export const useOfficeSkillsMarketplace = ({
         setSkillsAllowlist(allowlist);
       } catch (err) {
         if (requestId !== requestIdRef.current) {
+          return;
+        }
+        if (isMissingReadScopeError(err)) {
+          missingReadScopeRef.current = true;
+          setSkillsReport(null);
+          setSkillsAllowlist(undefined);
+          setError(null);
           return;
         }
         const nextMessage =

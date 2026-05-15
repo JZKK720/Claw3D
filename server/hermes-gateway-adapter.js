@@ -16,7 +16,9 @@
  * Environment variables:
  *   HERMES_API_URL        Hermes HTTP API base URL   (default: http://localhost:8642)
  *   HERMES_API_KEY        Bearer token for Hermes     (default: empty)
- *   HERMES_ADAPTER_PORT   WebSocket port              (default: 18789)
+ *   HERMES_API_KEY_FILE   Local file containing that bearer token
+ *   HERMES_ADAPTER_BIND_HOST Host interface to listen on (default: 127.0.0.1)
+ *   HERMES_ADAPTER_PORT   WebSocket port              (default: 18791)
  *   HERMES_MODEL          Model identifier            (default: hermes)
  *   HERMES_AGENT_NAME     Display name in Claw3D UI   (default: Hermes)
  */
@@ -56,9 +58,28 @@ function loadRuntimeEnv() {
 
 loadRuntimeEnv();
 
+function resolveSecretFilePath(rawPath) {
+  const trimmed = typeof rawPath === "string" ? rawPath.trim() : "";
+  if (!trimmed) return null;
+  return path.isAbsolute(trimmed) ? trimmed : path.join(process.cwd(), trimmed);
+}
+
+function readSecretEnv(valueEnvKey, fileEnvKey) {
+  const inlineValue = typeof process.env[valueEnvKey] === "string" ? process.env[valueEnvKey].trim() : "";
+  if (inlineValue) return inlineValue;
+  try {
+    const filePath = resolveSecretFilePath(process.env[fileEnvKey]);
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    return fs.readFileSync(filePath, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 const HERMES_API_URL = (process.env.HERMES_API_URL || "http://localhost:8642").replace(/\/$/, "");
-const HERMES_API_KEY = process.env.HERMES_API_KEY || "";
-const ADAPTER_PORT = parseInt(process.env.HERMES_ADAPTER_PORT || "18789", 10);
+const HERMES_API_KEY = readSecretEnv("HERMES_API_KEY", "HERMES_API_KEY_FILE");
+const ADAPTER_BIND_HOST = process.env.HERMES_ADAPTER_BIND_HOST || "127.0.0.1";
+const ADAPTER_PORT = parseInt(process.env.HERMES_ADAPTER_PORT || "18791", 10);
 const HERMES_MODEL = process.env.HERMES_MODEL || "hermes";
 const HERMES_AGENT_NAME = process.env.HERMES_AGENT_NAME || "Hermes";
 const HOME = process.env.HOME || "/tmp";
@@ -1257,7 +1278,7 @@ function startAdapter() {
     });
   });
 
-  httpServer.listen(ADAPTER_PORT, "127.0.0.1", () => {
+  httpServer.listen(ADAPTER_PORT, ADAPTER_BIND_HOST, () => {
     console.log(`\n[hermes-adapter] ✓ Listening on ws://localhost:${ADAPTER_PORT}`);
     console.log(`[hermes-adapter] ✓ Forwarding to Hermes API at ${HERMES_API_URL}`);
     console.log(`[hermes-adapter] ✓ Model: ${HERMES_MODEL}`);

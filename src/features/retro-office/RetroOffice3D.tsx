@@ -2217,6 +2217,27 @@ const getAgentInitials = (name: string | null | undefined): string => {
     .join("");
 };
 
+const areRenderAgentUiSnapshotsEqual = (
+  current: Record<string, RenderAgentUiSnapshot>,
+  next: Record<string, RenderAgentUiSnapshot>,
+): boolean => {
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+  if (currentKeys.length !== nextKeys.length) return false;
+  for (const key of currentKeys) {
+    const currentEntry = current[key];
+    const nextEntry = next[key];
+    if (!nextEntry) return false;
+    if (
+      currentEntry.state !== nextEntry.state ||
+      currentEntry.status !== nextEntry.status
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const buildInitialFurnitureLayout = (
   storageNamespace: string,
   layoutPreset: OfficeLayoutPreset,
@@ -2870,7 +2891,9 @@ export function RetroOffice3D({
           status: agent.status,
         };
       }
-      setRenderAgentUiById(next);
+      setRenderAgentUiById((current) =>
+        areRenderAgentUiSnapshotsEqual(current, next) ? current : next,
+      );
     };
 
     syncRenderAgentUi();
